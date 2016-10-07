@@ -23,20 +23,28 @@
           (when (symbolp exp) (list exp)))))
 
 ;; remember to add a list test and nil case
+;; also, if the car of the list is a list (clause), so that doesn't get fucked by the expansion order
 ;; how to be decide to stop on the last sym case?
 ;;   test for nil list somehow, win if more than 0 or 1 iterations?
+;;   top level should not stop until full list is matched!
+;;     this makes greedy and lazy hard to implement
 (defmacro match (exp)
-	(if (stringp (car exp))
-		 `(when (and *list* (eq ,(intern (string-upcase (car exp))) (car *list*)))
-			     (let ((*list (cdr *list*)))
-					     (match ,(cdr exp))))
-		 (aif (gethash (car exp) destr-match-clauses)
-			   (apply it (cdr exp))
-				(with-gensyms (i)
-					`(iter (for ,i on *list*)
-							 (setf ,(cdr list) ,i)
-							 (when (match ,(cddr exp))
-								    (leave t)))))))
+	(if (not (listp exp))
+		 (error "uh oh")
+		 (if (listp (car exp))
+			  (aif (gethash (caar exp) destr-match-clauses)
+				    (funcall it (cdr exp) (cdar exp))) ;; ew 
+			  (if (stringp (car exp))
+				   `(when (and *list* (eq ,(intern (string-upcase (car exp))) (car *list*)))
+						  (let ((*list (cdr *list*)))
+							     (match ,(cdr exp))))
+					(aif (gethash (car exp) destr-match-clauses)
+						  (funcall it (cdr exp))
+						  (with-gensyms (i)
+						     `(iter (for ,i on *list*)
+										(setf ,(cdr exp) ,i)
+										(when (match ,(cddr exp))
+												(leave t)))))))))
 
 ;; clauses
 ;;   switch - matches forms, takes the first to work, analogous to parmesan choice
@@ -47,11 +55,11 @@
 ;;   key - same as test, except the result of the function is bound instead of the normal result
 ;;   on-fail - expression to be returned by the whole thing if that subform fails to match
 
-(def-match-clause single (rest)
+(def-match-clause single (rest var)
 	`(when *list* 
 			  (setf ,var (car *list*))
 			  (let ((*list* (cdr *list*))) 
-				     (match ,rest))))
+				     ())))
 
 ;; general process
 ;;   process the match-form
@@ -60,5 +68,6 @@
 ;;   recursive expansion of clauses
 ;;   generate the full form, inside a let
 (defmacro destructuring-match (exp match-form &rest body)
-   (let ((match-form (macroexpand-all match-form)))
-			()))
+   (let ((match-form (macroexpand match-form)))
+			(print match-form)
+			''foo))
