@@ -2,7 +2,7 @@
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 (setf *print-case* :downcase)
-(ql:quickload '(alexandria iterate anaphora) :silent t)
+;; (ql:quickload '(alexandria iterate anaphora) :silent t)
 
 (defpackage destr-match
  (:use cl alexandria iterate anaphora))
