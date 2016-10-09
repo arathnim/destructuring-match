@@ -12,4 +12,4 @@ To install quicklisp, head over to [quicklisp's website](https://www.quicklisp.o
 the instructions there. Make sure you run `(ql:add-to-init-file)`, otherwise quicklisp won't be avaliable 
 when you start your interpreter.
 
-To use it, clone this repo into `~/quicklisp/local-projects`, and run `(ql:quickload 'destr-match)`.
+To use it, clone this repo into `~/quicklisp/local-projects`, and run `(ql:quickload 'destructuring-match)`.

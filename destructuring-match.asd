@@ -1,4 +1,4 @@
-(asdf:defsystem "destr-match"
+(asdf:defsystem "destructuring-match"
 	:serial t
 	:version "1.0"
 	:author "Dylan Ball <arathnim@gmail.com>"
