@@ -2,10 +2,10 @@
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 (setf *print-case* :downcase)
-(ql:quickload '(alexandria cl-ppcre iterate anaphora) :silent t)
+(ql:quickload '(alexandria iterate anaphora) :silent t)
 
 (defpackage destr-match
- (:use cl alexandria iterate cl-ppcre anaphora))
+ (:use cl alexandria iterate anaphora))
 (in-package destr-match)
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
