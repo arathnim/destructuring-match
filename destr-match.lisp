@@ -39,7 +39,7 @@
                    (leave t)))))
 
 (defun generate-end-case ()
-   `(not *list*))
+   `(not *list*)) ;; well, that was easy
 
 ;; remember to add a list test and nil case
 ;; also, if the car of the list is a list (clause), so that doesn't get fucked by the expansion order
