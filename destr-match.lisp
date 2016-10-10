@@ -13,20 +13,29 @@
 ;;   add neat switch macro
 ;;   key argument for matching strings instead of symbols
 ;;     another for case sensitivity? 
+;;     more key args
 ;;   test everything
 ;;   fill out the README with examples and documentation
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
+(defparameter match-whole-list? t)
+(defparameter case-sensitive? nil)
+(defparameter matching-style 'symbols)
 
 (defmacro def-match-clause (name ll &rest rest)
    `(setf (gethash ',name destr-match-clauses) (lambda ,ll ,@rest)))
 
+(defparameter walking-behavior
+   `((test ,#'second)))
+
 (defun parse-out-free-symbols (exp)
    (delete-duplicates
       (if (listp exp) 
-          (iter (for x in exp)
-                (when (and (eq x (car exp)) (gethash x destr-match-clauses)) (next-iteration))
-                (aif (parse-out-free-symbols x) (appending it)))
+          (if (gethash (car exp) destr-match-clauses)
+              (let ((b (second (assoc (car exp) walking-behavior))))
+                    (parse-out-free-symbols (if b (funcall b exp) (cdr exp))))
+              (iter (for x in exp)
+                    (aif (parse-out-free-symbols x) (appending it))))
           (when (symbolp exp) (list exp)))))
 
 (defun generate-match-code (exp end)
@@ -42,15 +51,16 @@
                 (declare (fixnum ,i))
                 (for ,v = (subseq list 0 ,i))
                 (setf ,(car exp) ,v)
-                (for w = (let ((list (subseq list ,i))) (match ,(cdr exp))))
-                (when w (leave w))
+                (for ,w = (let ((list (subseq list ,i))) (match ,(cdr exp))))
+                (when ,(if match-whole-list? `(eq ,w t) w) (leave ,w))
                 (finally (setf ,(car exp) nil) (return nil))))))
 
 (defmacro match (exp)
+   (print exp)
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
-          (aif (gethash (caar exp) destr-match-clauses)
-               (funcall it (cdar exp) (cdr exp) end-of-chain?)) ;; ew 
+          (awhen (gethash (caar exp) destr-match-clauses)
+                 (funcall it (cdar exp) (cdr exp) end-of-chain?)) ;; ew 
           (if (stringp (car exp))
               (generate-match-code exp end-of-chain?)
               (generate-bind-code exp end-of-chain?)))))
@@ -69,21 +79,31 @@
    (if end
        `(match ,forms)
        (with-gensyms (foo)
-          `(let ((,foo (match ,forms)))
-                 (let ((list (if ,foo ,foo list)))
-                       (if (eq ,foo t)
-                           nil 
-                           (match ,rest)))))))
+          `(let ((,foo (match ,(append forms rest))))
+                 (if ,foo ,foo (match ,rest))))))
 
 (def-match-clause single (var rest end)
    (if end
-       `(when (car list)
-          (setf ,(car var) (car list))
-          t)
+       `(progn (setf ,(car var) (car list))
+               (if (not (cdr list))
+                   t
+                   (cdr list)))
        `(when (car list)
           (setf ,(car var) (car list))
           (let ((list (cdr list)))
                 (match ,rest)))))
+
+(def-match-clause test (var rest end)
+   (if end
+       `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
+       (with-gensyms (i v w)
+         `(iter (for ,i from 1 to (length list))
+                (declare (fixnum ,i))
+                (for ,v = (subseq list 0 ,i))
+                (setf ,(car var) ,v)
+                (for ,w = (let ((list (subseq list ,i))) (match ,rest)))
+                (when (and ,(if match-whole-list? `(eq ,w t) w) (funcall ,(second var) ,w)) (leave ,w))
+                (finally (setf ,(car exp) nil) (return nil))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
@@ -98,6 +118,6 @@
    (let ((match-form (macroexpand `(match ,match-form)))
          (bindings (parse-out-free-symbols match-form)))       
          `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-            (aif ,match-form
-                 ,@body 
+            (if ,match-form
+                ,@body 
                  nil))))
