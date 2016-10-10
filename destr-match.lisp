@@ -35,25 +35,25 @@
                 ,(if end 'list `(match ,(cdr exp))))))
 
 (defun generate-bind-code (exp end)
-	(if end
-		 `(when list (setf ,(car exp) list) t)
-		 (with-gensyms (i v w)
+   (if end
+       `(when list (setf ,(car exp) list) t)
+       (with-gensyms (i v w)
          `(iter (for ,i from 1 to (length list))
-				    (declare (fixnum ,i))
+                (declare (fixnum ,i))
                 (for ,v = (subseq list 0 ,i))
                 (setf ,(car exp) ,v)
-					 (for w = (let ((list (subseq list ,i))) (match ,(cdr exp))))
+                (for w = (let ((list (subseq list ,i))) (match ,(cdr exp))))
                 (when w (leave w))
-					 (finally (setf ,(car exp) nil) (return nil))))))
+                (finally (setf ,(car exp) nil) (return nil))))))
 
 (defmacro match (exp)
    (let ((end-of-chain? (not (cdr exp))))
-		(if (listp (car exp))
-			 (aif (gethash (caar exp) destr-match-clauses)
-					(funcall it (cdar exp) (cdr exp) end-of-chain?)) ;; ew 
-		    (if (stringp (car exp))
-				  (generate-match-code exp end-of-chain?)
-			     (generate-bind-code exp end-of-chain?)))))
+      (if (listp (car exp))
+          (aif (gethash (caar exp) destr-match-clauses)
+               (funcall it (cdar exp) (cdr exp) end-of-chain?)) ;; ew 
+          (if (stringp (car exp))
+              (generate-match-code exp end-of-chain?)
+              (generate-bind-code exp end-of-chain?)))))
 
 ;; clauses
 ;;   switch - matches forms, takes the first to work, analogous to parmesan choice
@@ -66,27 +66,27 @@
 ;;   on-fail - expression to be returned by the whole thing if that subform fails to match
 
 (def-match-clause optional (forms rest end)
-	(if end
-		 `(match ,forms)
-		 (with-gensyms (foo)
-		    `(let ((,foo (match ,forms)))
-					  (let ((list (if ,foo ,foo list)))
-							  (if (eq ,foo t)
-								   nil 
-								   (match ,rest)))))))
+   (if end
+       `(match ,forms)
+       (with-gensyms (foo)
+          `(let ((,foo (match ,forms)))
+                 (let ((list (if ,foo ,foo list)))
+                       (if (eq ,foo t)
+                           nil 
+                           (match ,rest)))))))
 
 (def-match-clause single (var rest end)
-	(if end
-		 `(when (car list)
-			 (setf ,(car var) (car list))
-			 t)
-		 `(when (car list)
-			 (setf ,(car var) (car list))
-			 (let ((list (cdr list)))
-				    (match ,rest)))))
+   (if end
+       `(when (car list)
+          (setf ,(car var) (car list))
+          t)
+       `(when (car list)
+          (setf ,(car var) (car list))
+          (let ((list (cdr list)))
+                (match ,rest)))))
 
 (defun simple-pair (list val)
-	(mapcar (lambda (x) (list x val)) list))
+   (mapcar (lambda (x) (list x val)) list))
 
 ;; general process
 ;;   process the match-form
@@ -98,6 +98,6 @@
    (let ((match-form (macroexpand `(match ,match-form)))
          (bindings (parse-out-free-symbols match-form)))       
          `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-				(aif ,match-form
-					  ,@body 
-					  nil))))
+            (aif ,match-form
+                 ,@body 
+                 nil))))
