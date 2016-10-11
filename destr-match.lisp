@@ -17,9 +17,9 @@
 ;;   [x] test everything
 ;;   [ ] fill out the README with examples and documentation
 ;;   [x] optimize binding code with tagbody and setf
+;;   [ ] figure out some way to condense all that repeated bind code
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
-(defparameter match-whole-list? t)
 (defparameter case-sensitive? nil)
 (defparameter matching-style 'symbols) ;; symbols, strings, or both
 
@@ -40,18 +40,18 @@
           (when (symbolp exp) (list exp)))))
 
 (defun match-test (str)
-	(case matching-style
-		(symbols `(eq ',(intern (string-upcase str)) (car list)))
-		(strings 
-			(if case-sensitive? 
-				 `(string= ,str (car list))
-				 `(equalp  ,str (car list))))
-		(both
-			`(if (symbolp (car list))
-				  (eq ',(intern (string-upcase str)) (car list))
-				  ,(if case-sensitive? 
-				       `(string= ,str (car list))
-				       `(equalp  ,str (car list)))))))
+   (case matching-style
+      (symbols `(eq ',(intern (string-upcase str)) (car list)))
+      (strings 
+         (if case-sensitive? 
+             `(string= ,str (car list))
+             `(equalp  ,str (car list))))
+      (both
+         `(if (symbolp (car list))
+              (eq ',(intern (string-upcase str)) (car list))
+              ,(if case-sensitive? 
+                   `(string= ,str (car list))
+                   `(equalp  ,str (car list)))))))
 
 (defun generate-match-code (exp end)
    `(when (and list ,(match-test (car exp)))
@@ -59,29 +59,31 @@
                 ,(if end 'list `(match ,(cdr exp))))))
 
 (defun generate-bind-code (exp end)
+   (print `(wtf ,exp))
    (if end
        `(when list (setf ,(car exp) list) t)
        (with-gensyms (v x w r loop succeed fail end)
          `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
                 (tagbody
-						,loop
-							(when (not ,x) (go ,fail))
-						   (setf ,w (let ((list ,x)) (match ,(cdr exp))))
-							(when ,(if match-whole-list? `(eq ,w t) w) (go ,succeed))
-							(appendf ,v (list (car ,x)))
-							(setf ,x (cdr ,x))
-							(go ,loop)
-						,fail
-						   (setf ,(car exp) nil)
-							(setf ,r nil)
-							(go ,end)
-						,succeed
-							(setf ,(car exp) ,v)
-							(setf ,r ,x)
-						,end)
-					 ,r))))
+                  ,loop
+                     (when (not ,x) (go ,fail))
+                     (setf ,w (let ((list ,x)) (match ,(cdr exp))))
+                     (when (eq ,w t) (go ,succeed))
+                     (appendf ,v (list (car ,x)))
+                     (setf ,x (cdr ,x))
+                     (go ,loop)
+                  ,fail
+                     (setf ,(car exp) nil)
+                     (setf ,r nil)
+                     (go ,end)
+                  ,succeed
+                     (setf ,(car exp) ,v)
+                     (setf ,r ,w)
+                  ,end)
+                ,r))))
 
 (defmacro match (exp)
+   (print `(match ,exp))
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
           (awhen (gethash (caar exp) destr-match-clauses)
@@ -121,14 +123,25 @@
 (def-match-clause test (var rest end)
    (if end
        `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
-       (with-gensyms (i v w)
-         `(iter (for ,i from 1 to (length list))
-                (declare (fixnum ,i))
-                (for ,v = (subseq list 0 ,i))
-                (setf ,(car var) ,v)
-                (for ,w = (let ((list (subseq list ,i))) (match ,rest)))
-                (when (and ,(if match-whole-list? `(eq ,w t) w) (funcall ,(second var) ,w)) (leave ,w))
-                (finally (setf ,(car exp) nil) (return nil))))))
+       (with-gensyms (v x w r loop succeed fail end)
+         `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
+                (tagbody
+                  ,loop
+                     (when (not ,x) (go ,fail))
+                     (setf ,w (let ((list ,x)) (match ,(cdr exp))))
+                     (when (and (eq ,w t) (funcall ,(second var) ,w)) (go ,succeed))
+                     (appendf ,v (list (car ,x)))
+                     (setf ,x (cdr ,x))
+                     (go ,loop)
+                  ,fail
+                     (setf ,(car exp) nil)
+                     (setf ,r nil)
+                     (go ,end)
+                  ,succeed
+                     (setf ,(car exp) ,v)
+                     (setf ,r ,w)
+                  ,end)
+                ,r))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
