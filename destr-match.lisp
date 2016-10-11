@@ -13,21 +13,22 @@
 ;;   [ ] add neat switch macro
 ;;   [x] key argument for matching strings instead of symbols
 ;;   [x]   another for case sensitivity? 
-;;   [ ]   more key args
+;;   [x]   more key args
 ;;   [x] test everything
 ;;   [ ] fill out the README with examples and documentation
 ;;   [x] optimize binding code with tagbody and setf
 ;;   [ ] figure out some way to condense all that repeated bind code
+;;   [ ] regex matching
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
-(defparameter case-sensitive? nil)
-(defparameter matching-style 'symbols) ;; symbols, strings, or both
+(defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
 
 (defmacro def-match-clause (name ll &rest rest)
    `(setf (gethash ',name destr-match-clauses) (lambda ,ll ,@rest)))
 
 (defparameter walking-behavior
-   `((test ,#'second)))
+   `((test ,#'second)
+     (key ,#'second)))
 
 (defun parse-out-free-symbols (exp)
    (delete-duplicates
@@ -41,17 +42,12 @@
 
 (defun match-test (str)
    (case matching-style
-      (symbols `(eq ',(intern (string-upcase str)) (car list)))
-      (strings 
-         (if case-sensitive? 
-             `(string= ,str (car list))
-             `(equalp  ,str (car list))))
-      (both
-         `(if (symbolp (car list))
-              (eq ',(intern (string-upcase str)) (car list))
-              ,(if case-sensitive? 
-                   `(string= ,str (car list))
-                   `(equalp  ,str (car list)))))))
+      (symbol         `(eq ',(intern (string-upcase str)) (car list)))
+      (string         `(equalp  ,str (car list)))
+      (case-sensitive `(string= ,str (car list)))
+      (regex          `(cl-ppcre:scan ,str (car list)))
+      (symbol-regex   `(cl-ppcre:scan ,str (string (car list))))
+      (otherwise       (error "something went very wrong"))))
 
 (defun generate-match-code (exp end)
    `(when (and list ,(match-test (car exp)))
@@ -59,7 +55,6 @@
                 ,(if end 'list `(match ,(cdr exp))))))
 
 (defun generate-bind-code (exp end)
-   (print `(wtf ,exp))
    (if end
        `(when list (setf ,(car exp) list) t)
        (with-gensyms (v x w r loop succeed fail end)
@@ -83,7 +78,6 @@
                 ,r))))
 
 (defmacro match (exp)
-   (print `(match ,exp))
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
           (awhen (gethash (caar exp) destr-match-clauses)
@@ -103,6 +97,13 @@
 ;;   on-fail - expression to be returned by the whole thing if that subform fails to match
 
 (def-match-clause optional (forms rest end)
+   (if end
+       `(match ,forms)
+       (with-gensyms (foo)
+          `(let ((,foo (match ,(append forms rest))))
+                 (if ,foo ,foo (match ,rest))))))
+
+(def-match-clause switch (forms rest end)
    (if end
        `(match ,forms)
        (with-gensyms (foo)
@@ -152,9 +153,10 @@
 ;;   parse out the relevent symbols
 ;;   recursive expansion of clauses
 ;;   generate the full form, inside a let
-(defmacro destructuring-match (exp match-form &rest body)
+(defmacro destructuring-match (exp style match-form &rest body)
    (let ((match-form (macroexpand `(match ,match-form)))
-         (bindings (parse-out-free-symbols match-form)))       
+         (bindings (parse-out-free-symbols match-form)))
+         (setf matching-style style)       
          `(let ,(append `((list ,exp)) (simple-pair bindings nil))
             (if ,match-form
                 ,@body 

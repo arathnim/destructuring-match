@@ -4,5 +4,5 @@
    :author "Dylan Ball <arathnim@gmail.com>"
    :maintainer "Dylan Ball <arathnim@gmail.com>"
    :description "matching list destructuring"
-   :depends-on (alexandria iterate anaphora)
+   :depends-on (alexandria iterate anaphora cl-ppcre)
    :components ((:file "destr-match")))
