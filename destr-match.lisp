@@ -10,11 +10,14 @@
 (in-package destr-match)
 
 ;; TODO
-;;   [ ] finish off matching clauses
-;;   [ ] make the actual macro nicer
-;;   [ ] add neat switch macro
+;;   [x] finish off matching clauses
+;;   [x] make the actual macro nicer
+;;   [ ] neat switch macro
+;;   [ ] neat function definition macro
 ;;   [ ] fill out the README with examples and documentation
 ;;   [ ] figure out some way to condense all that repeated bind code
+;;   [ ] general atom parsing, just because
+;;   [ ] sublists?
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
@@ -100,9 +103,10 @@
                  (if ,foo ,foo (match ,rest))))))
 
 (def-match-clause switch (forms rest end)
-   (print `(switch ,forms ,rest ,(append (car forms) rest)))
    (if (not (cdr forms))
-      `(match ,(car forms))
+       (if end 
+         `(match ,(car forms))
+         `(match ,(append (car forms) rest)))
        (if end
            (with-gensyms (foo)
              `(let ((,foo (match ,(first forms))))
@@ -179,8 +183,12 @@
 ;;   parse out the relevent symbols
 ;;   recursive expansion of clauses
 ;;   generate the full form, inside a let
-(defmacro destructuring-match (exp style match-form &rest body)
-   (setf matching-style style)
+(defmacro destructuring-match (exp match-form &rest body)
+   (when (eq exp :mode)
+         (setf matching-style match-form)
+         (setf exp (first body))
+         (setf match-form (second body))
+         (setf body (cddr body)))
    (let ((match-form (macroexpand `(match ,match-form)))
          (bindings (parse-out-free-symbols match-form)))
          `(let ,(append `((list ,exp)) (simple-pair bindings nil))
