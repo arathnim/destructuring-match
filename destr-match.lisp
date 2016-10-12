@@ -1,24 +1,20 @@
-(proclaim '(optimize (speed 3) (safety 0) (debug 0) (space 3)))
+(proclaim '(optimize (speed 3) (safety 0) (debug 0) (space 0)))
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 (setf *print-case* :downcase)
 ;; (ql:quickload '(alexandria iterate anaphora) :silent t)
 
 (defpackage destr-match
- (:use cl alexandria iterate anaphora))
+  (:use cl alexandria iterate anaphora)
+  (:shadow switch))
 (in-package destr-match)
 
 ;; TODO
 ;;   [ ] finish off matching clauses
+;;   [ ] make the actual macro nicer
 ;;   [ ] add neat switch macro
-;;   [x] key argument for matching strings instead of symbols
-;;   [x]   another for case sensitivity? 
-;;   [x]   more key args
-;;   [x] test everything
 ;;   [ ] fill out the README with examples and documentation
-;;   [x] optimize binding code with tagbody and setf
 ;;   [ ] figure out some way to condense all that repeated bind code
-;;   [ ] regex matching
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
@@ -51,8 +47,9 @@
 
 (defun generate-match-code (exp end)
    `(when (and list ,(match-test (car exp)))
-          (let ((list (cdr list)))
-                ,(if end 'list `(match ,(cdr exp))))))
+         ,(if end 't
+            `(let ((list (cdr list)))
+                   (match ,(cdr exp))))))
 
 (defun generate-bind-code (exp end)
    (if end
@@ -80,21 +77,20 @@
 (defmacro match (exp)
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
-          (awhen (gethash (caar exp) destr-match-clauses)
-                 (funcall it (cdar exp) (cdr exp) end-of-chain?)) ;; ew 
+          (aif (gethash (caar exp) destr-match-clauses)
+               (funcall it (cdar exp) (cdr exp) end-of-chain?)
+               (error "stuff is seriously messed up here: ~a" exp)) 
           (if (stringp (car exp))
               (generate-match-code exp end-of-chain?)
               (generate-bind-code exp end-of-chain?)))))
 
 ;; clauses
 ;;   switch - matches forms, takes the first to work, analogous to parmesan choice
-;;   any - causes it to match zero or more list elements
 ;;   single - causes it to match only one form
 ;;   optional - if it matches, take that out of the list, keep matching either way,
 ;;     putting a single binding var at the end will break everything, as usual
 ;;   test - means the form must match the condition described as well as the structure of the match
 ;;   key - same as test, except the result of the function is bound instead of the normal result
-;;   on-fail - expression to be returned by the whole thing if that subform fails to match
 
 (def-match-clause optional (forms rest end)
    (if end
@@ -104,11 +100,16 @@
                  (if ,foo ,foo (match ,rest))))))
 
 (def-match-clause switch (forms rest end)
-   (if end
-       `(match ,forms)
-       (with-gensyms (foo)
-          `(let ((,foo (match ,(append forms rest))))
-                 (if ,foo ,foo (match ,rest))))))
+   (print `(switch ,forms ,rest ,(append (car forms) rest)))
+   (if (not (cdr forms))
+      `(match ,(car forms))
+       (if end
+           (with-gensyms (foo)
+             `(let ((,foo (match ,(first forms))))
+                    (if ,foo ,foo (match ((switch ,@(cdr forms)))))))
+           (with-gensyms (foo)
+             `(let ((,foo (match ,(append (car forms) rest))))
+                    (if ,foo ,foo (match ,(append `((switch ,@(cdr forms))) rest))))))))
 
 (def-match-clause single (var rest end)
    (if end
@@ -123,23 +124,48 @@
 
 (def-match-clause test (var rest end)
    (if end
-       `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
+      `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
        (with-gensyms (v x w r loop succeed fail end)
          `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
                 (tagbody
                   ,loop
                      (when (not ,x) (go ,fail))
-                     (setf ,w (let ((list ,x)) (match ,(cdr exp))))
-                     (when (and (eq ,w t) (funcall ,(second var) ,w)) (go ,succeed))
+                     (setf ,w (let ((list ,x)) (match ,rest)))
+                     (when (and (eq ,w t) (funcall ,(second var) ,v)) (go ,succeed))
                      (appendf ,v (list (car ,x)))
                      (setf ,x (cdr ,x))
                      (go ,loop)
                   ,fail
-                     (setf ,(car exp) nil)
+                     (setf ,(car var) nil)
                      (setf ,r nil)
                      (go ,end)
                   ,succeed
-                     (setf ,(car exp) ,v)
+                     (setf ,(car var) ,v)
+                     (setf ,r ,w)
+                  ,end)
+                ,r))))
+
+(def-match-clause key (var rest end)
+   (if end
+      `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
+       (with-gensyms (v x w r f loop succeed fail end)
+         `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
+                (tagbody
+                  ,loop
+                     (when (not ,x) (go ,fail))
+                     (setf ,w (let ((list ,x)) (match ,rest)))
+                     (let ((,f (funcall ,(second var) ,v))) 
+                           (when (and (eq ,w t) ,f)
+                                 (setf ,(car var) ,f) 
+                                 (go ,succeed)))
+                     (appendf ,v (list (car ,x)))
+                     (setf ,x (cdr ,x))
+                     (go ,loop)
+                  ,fail
+                     (setf ,(car var) nil)
+                     (setf ,r nil)
+                     (go ,end)
+                  ,succeed
                      (setf ,r ,w)
                   ,end)
                 ,r))))
@@ -154,9 +180,9 @@
 ;;   recursive expansion of clauses
 ;;   generate the full form, inside a let
 (defmacro destructuring-match (exp style match-form &rest body)
+   (setf matching-style style)
    (let ((match-form (macroexpand `(match ,match-form)))
          (bindings (parse-out-free-symbols match-form)))
-         (setf matching-style style)       
          `(let ,(append `((list ,exp)) (simple-pair bindings nil))
             (if ,match-form
                 ,@body 
