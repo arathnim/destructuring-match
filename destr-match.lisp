@@ -10,14 +10,16 @@
 (in-package destr-match)
 
 ;; TODO
-;;   [x] finish off matching clauses
-;;   [x] make the actual macro nicer
 ;;   [ ] neat switch macro
 ;;   [ ] neat function definition macro
 ;;   [ ] fill out the README with examples and documentation
-;;   [ ] figure out some way to condense all that repeated bind code
-;;   [ ] general atom parsing, just because
+;;   [ ] general atom matching, just because
 ;;   [ ] sublists?
+;;   [ ] make special parsing for single inside test and key
+;;   [ ] macroexpansion doesn't actually word, modify match
+;;   [x] if the form provided to d-m has a car that is a clause, wrap it in a list
+;;   [ ] make switch (list) raw forms, so everything still works
+;;   [ ] modify match so clause names without arguments are bindings; may also require changes to parsing
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
@@ -29,11 +31,22 @@
    `((test ,#'second)
      (key ,#'second)))
 
+;; NOTE combine these two by appendf'ing into a list? shouldn't be too hard
+(defun expand-macros (exp)
+	(if (and (listp exp) (symbolp (car exp)))
+		 (if (gethash (car exp) destr-match-clauses)
+			  (let ((b (second (assoc (car exp) walking-behavior))))
+				     (expand-macros (if b (funcall b exp) (cdr exp))))
+			  (multiple-value-bind (a b) (macroexpand exp)
+			     (if b a exp)))
+		 exp))
+
 (defun parse-out-free-symbols (exp)
    (delete-duplicates
-      (if (listp exp) 
+      (if (listp exp)
           (if (gethash (car exp) destr-match-clauses)
               (let ((b (second (assoc (car exp) walking-behavior))))
+					     (print exp)
                     (parse-out-free-symbols (if b (funcall b exp) (cdr exp))))
               (iter (for x in exp)
                     (aif (parse-out-free-symbols x) (appending it))))
@@ -78,6 +91,7 @@
                 ,r))))
 
 (defmacro match (exp)
+	(print `(match ,exp))
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
           (aif (gethash (caar exp) destr-match-clauses)
@@ -177,21 +191,19 @@
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
 
-;; general process
-;;   process the match-form
-;;   expand macros, warning or error on actual functions
-;;   parse out the relevent symbols
-;;   recursive expansion of clauses
-;;   generate the full form, inside a let
 (defmacro destructuring-match (exp match-form &rest body)
    (when (eq exp :mode)
          (setf matching-style match-form)
          (setf exp (first body))
          (setf match-form (second body))
          (setf body (cddr body)))
+	(when (gethash (car match-form) destr-match-clauses)
+		   (setf match-form (list match-form)))
    (let ((match-form (macroexpand `(match ,match-form)))
-         (bindings (parse-out-free-symbols match-form)))
-         `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+		   (bindings (parse-out-free-symbols match-form)))
+        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
             (if ,match-form
                 ,@body 
                  nil))))
+
+(defmacro match-keyword (x) `(test ,x (lambda (ll) (keyword? (car ll)))))
