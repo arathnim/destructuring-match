@@ -6,7 +6,7 @@ and parsing command syntax, as in irc bots or other text interfaces.
 `(destructuring-match (optional :mode matching-mode) expression match-form &rest body)`
 
 ### clauses
-* `switch &rest forms` matches any number of forms, takes the first to work
+* `choice &rest forms` matches any number of forms, takes the first to work
 * `single var` causes it to match only one element of the list
 * `optional &rest forms` if it matches, take that out of the list, keep matching either way
 * `test var function` makes the form match the condition described as well as the structure of the match
