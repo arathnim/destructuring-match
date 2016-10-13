@@ -1,8 +1,6 @@
 (proclaim '(optimize (speed 3) (safety 0) (debug 0) (space 0)))
 ;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
 ;(declaim #+sbcl(sb-ext:muffle-conditions warning))
-(setf *print-case* :downcase)
-;; (ql:quickload '(alexandria iterate anaphora) :silent t)
 
 (defpackage destr-match
   (:use cl alexandria iterate anaphora)
@@ -10,16 +8,17 @@
 (in-package destr-match)
 
 ;; TODO
-;;   [ ] neat switch macro
-;;   [ ] neat function definition macro
-;;   [ ] fill out the README with examples and documentation
-;;   [ ] general atom matching, just because
-;;   [ ] sublists?
-;;   [ ] make special parsing for single inside test and key
-;;   [ ] macroexpansion doesn't actually word, modify match
-;;   [x] if the form provided to d-m has a car that is a clause, wrap it in a list
-;;   [ ] make switch (list) raw forms, so everything still works
-;;   [ ] modify match so clause names without arguments are bindings; may also require changes to parsing
+;; [ ] neat switch macro
+;; [x] neat function definition macro
+;; [ ] fill out the README with examples and documentation
+;; [x] general atom matching, just because
+;; [ ] sublists?
+;; [ ] make special parsing for single inside test and key
+;; [x] macroexpansion doesn't actually word, modify match
+;; [x] if the form provided to d-m has a car that is a clause, wrap it in a list
+;; [ ] make switch (list) raw forms, so everything still works
+;; [ ] modify match so clause names without arguments are bindings; may also require changes to parsing
+;; [ ] full literal value matching, using quotes for symbols?
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
@@ -27,30 +26,28 @@
 (defmacro def-match-clause (name ll &rest rest)
    `(setf (gethash ',name destr-match-clauses) (lambda ,ll ,@rest)))
 
-(defparameter walking-behavior
-   `((test ,#'second)
-     (key ,#'second)))
+(defun symbol? (exp) (and (symbolp exp) (not (keywordp exp))))
 
-;; NOTE combine these two by appendf'ing into a list? shouldn't be too hard
+(defvar free-symbols nil)
+(defun expand-main (exp)
+   (let* ((free-symbols nil)
+          (exp (expand-macros exp)))
+          (values exp free-symbols)))
+
 (defun expand-macros (exp)
-	(if (and (listp exp) (symbolp (car exp)))
-		 (if (gethash (car exp) destr-match-clauses)
-			  (let ((b (second (assoc (car exp) walking-behavior))))
-				     (expand-macros (if b (funcall b exp) (cdr exp))))
-			  (multiple-value-bind (a b) (macroexpand exp)
-			     (if b a exp)))
-		 exp))
-
-(defun parse-out-free-symbols (exp)
-   (delete-duplicates
-      (if (listp exp)
-          (if (gethash (car exp) destr-match-clauses)
-              (let ((b (second (assoc (car exp) walking-behavior))))
-					     (print exp)
-                    (parse-out-free-symbols (if b (funcall b exp) (cdr exp))))
-              (iter (for x in exp)
-                    (aif (parse-out-free-symbols x) (appending it))))
-          (when (symbolp exp) (list exp)))))
+   (if (and (listp exp) (symbolp (car exp)))
+       (or (when (gethash (car exp) destr-match-clauses)
+                 (if (member (car exp) '(test key)) 
+                     (list (first exp) (expand-macros (second exp)) (third exp)) 
+                     (cons (car exp) (mapcar #'expand-macros (cdr exp)))))
+           (multiple-value-bind (a b) (macroexpand exp)
+              (when b (expand-macros a)))
+           (mapcar #'expand-macros exp))
+       (if (symbol? exp) 
+           (progn (appendf free-symbols (list exp)) exp)
+           (if (listp exp) 
+               (mapcar #'expand-macros exp)
+               exp))))
 
 (defun match-test (str)
    (case matching-style
@@ -63,6 +60,12 @@
 
 (defun generate-match-code (exp end)
    `(when (and list ,(match-test (car exp)))
+         ,(if end 't
+            `(let ((list (cdr list)))
+                   (match ,(cdr exp))))))
+
+(defun generate-atom-code (exp end)
+   `(when (and list (equalp ,(car exp) (car list)))
          ,(if end 't
             `(let ((list (cdr list)))
                    (match ,(cdr exp))))))
@@ -91,7 +94,6 @@
                 ,r))))
 
 (defmacro match (exp)
-	(print `(match ,exp))
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
           (aif (gethash (caar exp) destr-match-clauses)
@@ -99,7 +101,9 @@
                (error "stuff is seriously messed up here: ~a" exp)) 
           (if (stringp (car exp))
               (generate-match-code exp end-of-chain?)
-              (generate-bind-code exp end-of-chain?)))))
+              (if (symbol? (car exp)) 
+                  (generate-bind-code exp end-of-chain?)
+                  (generate-atom-code exp end-of-chain?))))))
 
 ;; clauses
 ;;   switch - matches forms, takes the first to work, analogous to parmesan choice
@@ -197,13 +201,25 @@
          (setf exp (first body))
          (setf match-form (second body))
          (setf body (cddr body)))
-	(when (gethash (car match-form) destr-match-clauses)
-		   (setf match-form (list match-form)))
-   (let ((match-form (macroexpand `(match ,match-form)))
-		   (bindings (parse-out-free-symbols match-form)))
-        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-            (if ,match-form
-                ,@body 
-                 nil))))
+   (when (gethash (car match-form) destr-match-clauses)
+         (setf match-form (list match-form)))
+   (multiple-value-bind (match-form bindings) (expand-main match-form)
+      `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+             (if (match ,match-form)
+                 ,@body 
+                  nil))))
 
-(defmacro match-keyword (x) `(test ,x (lambda (ll) (keyword? (car ll)))))
+;; bloody magic. This could probably actually be used to replace defun
+;; also, sb-impl::%defun was defined on a lisp machine. check the description.
+;; NOTE make a special version of the main macro that errors on non-match!
+;;      maybe a way to change the mode/style as well
+(defmacro defun-match (name ll &rest body)
+   (with-gensyms (args)
+      `(progn (eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
+              (sb-impl::%defun ',name 
+                (sb-int:named-lambda ,name (&rest ,args)
+                  (block ,name 
+                     (destructuring-match ,args ,ll ,@body)))
+                (sb-c:source-location)))))
+
+(defmacro match-keyword (x) `(test ,x (lambda (ll) (keywordp (car ll)))))
