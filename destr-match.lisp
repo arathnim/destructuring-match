@@ -8,15 +8,11 @@
 (in-package destr-match)
 
 ;; TODO
-;; [ ] neat switch macro
-;; [x] neat function definition macro
+;; [x] neat switch macro
 ;; [ ] fill out the README with examples and documentation
-;; [x] general atom matching, just because
 ;; [ ] sublists?
 ;; [ ] make special parsing for single inside test and key
-;; [x] macroexpansion doesn't actually word, modify match
-;; [x] if the form provided to d-m has a car that is a clause, wrap it in a list
-;; [ ] make switch (list) raw forms, so everything still works
+;; [x] make switch (list) raw forms, so everything still works
 ;; [ ] modify match so clause names without arguments are bindings; may also require changes to parsing
 ;; [ ] full literal value matching, using quotes for symbols?
 
@@ -121,6 +117,7 @@
                  (if ,foo ,foo (match ,rest))))))
 
 (def-match-clause switch (forms rest end)
+   (setf (car forms) (if (not (listp (car forms))) (list (car forms)) (car forms)))
    (if (not (cdr forms))
        (if end 
          `(match ,(car forms))
@@ -208,6 +205,14 @@
              (if (match ,match-form)
                  ,@body 
                   nil))))
+
+(defmacro destructuring-match-switch (exp &rest forms)
+   (with-gensyms (f)
+      `(let ((,f ,exp)) 
+             (or 
+               ,@(mapcar 
+                  (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) 
+                  forms)))))
 
 ;; bloody magic. This could probably actually be used to replace defun
 ;; also, sb-impl::%defun was defined on a lisp machine. check the description.
