@@ -25,9 +25,11 @@
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
 
 (defmacro def-match-clause (name ll &rest rest)
-   `(setf (gethash ',name destr-match-clauses) (lambda ,ll ,@rest)))
+   `(setf (gethash ,(string name) destr-match-clauses) (lambda ,ll ,@rest)))
 
 (defun symbol? (exp) (and (symbolp exp) (not (keywordp exp))))
+
+(defun symbol-eq (x y) (string= (string x) (string y)))
 
 (defvar free-symbols nil)
 (defun expand-main (exp)
@@ -36,10 +38,10 @@
           (values exp (delete-duplicates free-symbols))))
 
 (defun expand-macros (exp)
-   (if (and (listp exp) (symbolp (car exp)))
-       (or (when (gethash (car exp) destr-match-clauses)
+   (if (and (listp exp) (symbol? (car exp)))
+       (or (when (gethash (string (car exp)) destr-match-clauses)
                  (print `(clause ,exp)) 
-                 (if (member (car exp) '(test key)) 
+                 (if (member (car exp) '(test key) :test #'symbol-eq) 
                      (list (first exp) (expand-macros (second exp)) (third exp)) 
                      (cons (car exp) (mapcar #'expand-macros (cdr exp)))))
            (multiple-value-bind (a b) (macroexpand-1 exp)
@@ -99,7 +101,7 @@
 (defmacro match (exp)
    (let ((end-of-chain? (not (cdr exp))))
       (if (listp (car exp))
-          (aif (gethash (caar exp) destr-match-clauses)
+          (aif (gethash (string (caar exp)) destr-match-clauses)
                (funcall it (cdar exp) (cdr exp) end-of-chain?)
                (error "stuff is seriously messed up here: ~a" exp)) 
           (if (stringp (car exp))
@@ -111,10 +113,9 @@
 ;; clauses
 ;;   choice - matches forms, takes the first to work, analogous to parmesan choice
 ;;   single - causes it to match only one form
-;;   optional - if it matches, take that out of the list, keep matching either way,
-;;     putting a single binding var at the end will break everything, as usual
-;;   test - means the form must match the condition described as well as the structure of the match
-;;   key - same as test, except the result of the function is bound instead of the normal result
+;;   optional - if it matches, take that out of the list, keep matching either way
+;;   test - the form must match the condition described as well as the structure of the match
+;;   key - same as test, except the result of the function is bound instead
 
 (def-match-clause optional (forms rest end)
    (if end
@@ -159,7 +160,7 @@
                     (match ,rest)))))
 
 (def-match-clause test (var rest end)
-   (if (and (listp (first var)) (eq (car (first var)) 'single))
+   (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (test-single var rest end)
    (if end
       `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
@@ -194,7 +195,7 @@
                      (match ,rest)))))
 
 (def-match-clause key (var rest end)
-   (if (and (listp (first var)) (eq (car (first var)) 'single))
+   (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
       (key-single var rest end)
       (if end
         `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
@@ -229,7 +230,7 @@
          (setf exp (first body))
          (setf match-form (second body))
          (setf body (cddr body)))
-   (when (gethash (car match-form) destr-match-clauses)
+   (when (gethash (string (car match-form)) destr-match-clauses)
          (setf match-form (list match-form)))
    (multiple-value-bind (match-form bindings) (expand-main match-form)
       `(let ,(append `((list ,exp)) (simple-pair bindings nil))
