@@ -11,18 +11,21 @@
 (in-package destr-match)
 
 ;; TODO
-;; [x] MAKE THE PACKAGE NAME MATCH THE SYSTEM NAME
-;; [x] neat switch macro
-;; [ ] fill out the README with examples and documentation
-;; [ ] sublists?
-;; [x] make special parsing for single inside test and key
-;; [x] make switch (list) raw forms, so everything still works
+;; [w] fill out the README with examples and documentation
+;; [w] sublists
 ;; [ ] modify match so clause names without arguments are bindings
-;; [ ] full literal value matching, using quotes for symbols?
-;; [ ] fix indentation and maybe line length
+;; [?] full literal value matching, using quotes for symbols
+;; [w] fix indentation and maybe line length
+;; [w] single/multiple modes
+;; [w] make the variables update during matching
+;; [?] scan for free symbols in normal expressions, like (member foo '(bar baz)) 
+;;       would need some way of detecting already-bound local variables? 
+;; [?] optimize matching more
+;; [ ] another layer of expansion so you can overload macro names
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
+(defparameter single-mode t)
 
 (defmacro def-match-clause (name ll &rest rest)
    `(setf (gethash ,(string name) destr-match-clauses) (lambda ,ll ,@rest)))
@@ -39,13 +42,11 @@
 
 (defun expand-macros (exp)
    (if (and (listp exp) (symbol? (car exp)))
-       (or (when (gethash (string (car exp)) destr-match-clauses)
-                 (print `(clause ,exp)) 
+       (or (when (gethash (string (car exp)) destr-match-clauses) 
                  (if (member (car exp) '(test key) :test #'symbol-eq) 
                      (list (first exp) (expand-macros (second exp)) (third exp)) 
                      (cons (car exp) (mapcar #'expand-macros (cdr exp)))))
            (multiple-value-bind (a b) (macroexpand-1 exp)
-              (print `(macro ,exp ,b))
               (when b (expand-macros a)))
            (mapcar #'expand-macros exp))
        (if (symbol? exp) 
@@ -64,39 +65,50 @@
       (otherwise       (error "something went very wrong"))))
 
 (defun generate-match-code (exp end)
-   `(when (and list ,(match-test (car exp)))
-         ,(if end 't
-            `(let ((list (cdr list)))
-                   (match ,(cdr exp))))))
+  `(when (and list ,(match-test (car exp)))
+        ,(if end 't
+           `(let ((list (cdr list)))
+                  (match ,(cdr exp))))))
 
 (defun generate-atom-code (exp end)
-   `(when (and list (equalp ,(car exp) (car list)))
-         ,(if end 't
-            `(let ((list (cdr list)))
-                   (match ,(cdr exp))))))
+  `(when (and list (equalp ,(car exp) (car list)))
+        ,(if end 't
+           `(let ((list (cdr list)))
+                  (match ,(cdr exp))))))
+
+;; here be dragons
+(defun generate-bind-body (sym rest type &optional fun)
+   (if single-mode
+       nil
+       (with-gensyms (x w r f loop succeed fail end)
+         `(let ((,x (cdr list)) (,w nil) (,r nil))
+                (setf ,sym (list (car list)))
+                (tagbody
+                  ,loop
+                      (when (not ,x) (go ,fail))
+                      (setf ,w (let ((list ,x)) (match ,rest)))
+                     ,(case type
+                         (normal `(when (eq ,w t) (go ,succeed)))
+                         (test   `(when (and (eq ,w t) (funcall ,fun ,sym)) (go ,succeed)))
+                         (key    `(let ((,f (funcall ,fun ,sym)))
+                                        (when (and (eq ,w t) ,f)
+                                              (setf ,sym ,f) (go ,succeed)))))
+                      (appendf ,sym (list (car ,x)))
+                      (setf ,x (cdr ,x))
+                      (go ,loop)
+                  ,fail
+                      (setf ,sym nil)
+                      (setf ,r nil)
+                      (go ,end)
+                  ,succeed
+                      (setf ,r ,w)
+                  ,end)
+               ,r))))
 
 (defun generate-bind-code (exp end)
    (if end
-       `(when list (setf ,(car exp) list) t)
-       (with-gensyms (v x w r loop succeed fail end)
-         `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
-                (tagbody
-                  ,loop
-                     (when (not ,x) (go ,fail))
-                     (setf ,w (let ((list ,x)) (match ,(cdr exp))))
-                     (when (eq ,w t) (go ,succeed))
-                     (appendf ,v (list (car ,x)))
-                     (setf ,x (cdr ,x))
-                     (go ,loop)
-                  ,fail
-                     (setf ,(car exp) nil)
-                     (setf ,r nil)
-                     (go ,end)
-                  ,succeed
-                     (setf ,(car exp) ,v)
-                     (setf ,r ,w)
-                  ,end)
-                ,r))))
+      `(when list (setf ,(car exp) list) t)
+       (generate-bind-body (car exp) (cdr exp) 'normal)))
 
 (defmacro match (exp)
    (let ((end-of-chain? (not (cdr exp))))
@@ -113,13 +125,14 @@
 ;; clauses
 ;;   choice - matches forms, takes the first to work, analogous to parmesan choice
 ;;   single - causes it to match only one form
+;;   multiple - causes it to match any number of forms
 ;;   optional - if it matches, take that out of the list, keep matching either way
 ;;   test - the form must match the condition described as well as the structure of the match
 ;;   key - same as test, except the result of the function is bound instead
 
 (def-match-clause optional (forms rest end)
    (if end
-       `(match ,forms)
+      `(match ,forms)
        (with-gensyms (foo)
           `(let ((,foo (match ,(append forms rest))))
                  (if ,foo ,foo (match ,rest))))))
@@ -151,38 +164,20 @@
 
 (defun test-single (var rest end)
    (if end
-       `(when (and (car list) (funcall ,(second var) (car list)))
-              (setf ,(second (first var)) (car list))
-              (not (cdr list)))
-       `(when (and (car list) (funcall ,(second var) (car list)))
-              (setf ,(second (first var)) (car list))
-              (let ((list (cdr list)))
-                    (match ,rest)))))
+      `(when (and (car list) (funcall ,(second var) (car list)))
+             (setf ,(second (first var)) (car list))
+             (not (cdr list)))
+      `(when (and (car list) (funcall ,(second var) (car list)))
+             (setf ,(second (first var)) (car list))
+             (let ((list (cdr list)))
+                   (match ,rest)))))
 
 (def-match-clause test (var rest end)
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (test-single var rest end)
    (if end
       `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
-       (with-gensyms (v x w r loop succeed fail end)
-         `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
-                (tagbody
-                  ,loop
-                     (when (not ,x) (go ,fail))
-                     (setf ,w (let ((list ,x)) (match ,rest)))
-                     (when (and (eq ,w t) (funcall ,(second var) ,v)) (go ,succeed))
-                     (appendf ,v (list (car ,x)))
-                     (setf ,x (cdr ,x))
-                     (go ,loop)
-                  ,fail
-                     (setf ,(car var) nil)
-                     (setf ,r nil)
-                     (go ,end)
-                  ,succeed
-                     (setf ,(car var) ,v)
-                     (setf ,r ,w)
-                  ,end)
-                ,r)))))
+       (generate-bind-body (car var) rest 'test (second var)))))
 
 (defun key-single (var rest end)
    (if end
@@ -198,28 +193,8 @@
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
       (key-single var rest end)
       (if end
-        `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
-        (with-gensyms (v x w r f loop succeed fail end)
-          `(let ((,v (list (car list))) (,x (cdr list)) (,w nil) (,r nil))
-             (tagbody
-                ,loop
-                (when (not ,x) (go ,fail))
-                (setf ,w (let ((list ,x)) (match ,rest)))
-                (let ((,f (funcall ,(second var) ,v))) 
-                  (when (and (eq ,w t) ,f)
-                    (setf ,(car var) ,f) 
-                    (go ,succeed)))
-                (appendf ,v (list (car ,x)))
-                (setf ,x (cdr ,x))
-                (go ,loop)
-                ,fail
-                (setf ,(car var) nil)
-                (setf ,r nil)
-                (go ,end)
-                ,succeed
-                (setf ,r ,w)
-                ,end)
-             ,r)))))
+         `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
+          (generate-bind-body (car var) rest 'key (second var)))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
