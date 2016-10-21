@@ -13,6 +13,7 @@ and parsing command syntax, as in irc bots or other text interfaces.
 * `key var function` same as test, except the result of the function is bound to the var instead of the normal result
 
 parsing out key arguments?
+single-key arguments
 
 ## dependencies and installation
 
