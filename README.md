@@ -3,7 +3,7 @@ A small macro to destructure lists based on literal values and tests. Useful in 
 and parsing command syntax, as in irc bots or other text interfaces.
 
 ## usage
-`(destructuring-match (optional :mode matching-mode) expression match-form &rest body)`
+`(destructuring-match (key mode single) expression match-form &rest body)`
 
 ### clauses
 * `choice &rest forms` matches any number of forms, takes the first to work

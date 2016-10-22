@@ -15,16 +15,17 @@
 ;; [w] sublists
 ;; [ ] modify match so clause names without arguments are bindings
 ;; [?] full literal value matching, using quotes for symbols
-;; [w] single/multiple modes
+;; [x] single/multiple modes
 ;; [?] scan for free symbols in normal expressions, like (member foo '(bar baz)) 
 ;;       would need some way of detecting already-bound local variables? 
 ;; [?] another layer of expansion so you can overload macro names
 ;; [ ] key macros
-;; [ ] figure out how to set matching-style and single-mode in macroexpansion
+;; [x] figure out how to set matching-style and single-mode in macroexpansion
+;; [ ] tests
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
-(defvar matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
-(defvar single-mode nil)
+(defparameter matching-style 'symbol) ;; symbol, string, case-sensitive, regex, symbol-regex
+(defparameter single-mode nil)
 
 (defmacro def-match-clause (name ll &rest rest)
    `(setf (gethash ,(string name) destr-match-clauses) (lambda ,ll ,@rest)))
@@ -83,7 +84,7 @@
      ,(if rest 
         `(let ((list (cdr list)))
                (match ,rest))
-        `(not (car list)))))
+        `(not (cdr list)))))
 
 (defun bind-multiple (sym rest type &optional fun)
    (if (not rest)
@@ -164,6 +165,9 @@
 (def-match-clause single (var rest)
    (bind-single (car var) rest 'normal))
 
+(def-match-clause multiple (var rest)
+   (bind-multiple (car var) rest 'normal))
+
 (def-match-clause test (var rest)
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (bind-single (second (first var)) rest 'test (second var))
@@ -182,23 +186,21 @@
    (mapcar (lambda (x) (list x val)) list))
 
 (defmacro destructuring-match (&rest body)
-   (let ((matching-style 'symbol) (single-mode nil))
-      (iter (for x from 0 to (length body) by 2)
-          (cond 
-            ((eq :matching-mode (elt body x))
-             (setf matching-style (elt body (+ x 1))))
-            ((eq :single (elt body x))
-             (setf single-mode (elt body (+ x 1))))
-            (t (setf body (subseq body x)) (finish))))
-    (print body)
-    (print single-mode)
-    (print matching-style)
-    (destructuring-bind (exp match-form &rest rest) body
-      (multiple-value-bind (match-form bindings) (expand-main match-form)
-        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-           (if (match ,match-form)
-               ,@rest 
-               nil))))))
+   (setf matching-style 'symbol)
+   (setf single-mode nil)
+   (iter (for x from 0 to (length body) by 2)
+         (cond 
+           ((eq :mode (elt body x))
+            (setf matching-style (elt body (+ x 1))))
+           ((eq :single (elt body x))
+            (setf single-mode (elt body (+ x 1))))
+           (t (setf body (subseq body x)) (finish))))
+   (destructuring-bind (exp match-form &rest rest) body
+     (multiple-value-bind (match-form bindings) (expand-main match-form)
+       `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+          (if (match ,match-form)
+              (progn ,@rest) 
+              nil)))))
 
 (defmacro destructuring-match-switch (exp &rest forms)
    (with-gensyms (f)
