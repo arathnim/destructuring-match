@@ -12,15 +12,13 @@
 
 ;; TODO
 ;; [w] fill out the README with examples and documentation
-;; [w] sublists
+;; [x] sublists
 ;; [ ] modify match so clause names without arguments are bindings
 ;; [?] full literal value matching, using quotes for symbols
-;; [x] single/multiple modes
 ;; [?] scan for free symbols in normal expressions, like (member foo '(bar baz)) 
 ;;       would need some way of detecting already-bound local variables? 
 ;; [?] another layer of expansion so you can overload macro names
 ;; [ ] key macros
-;; [x] figure out how to set matching-style and single-mode in macroexpansion
 ;; [ ] tests
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
@@ -43,7 +41,7 @@
 (defun expand-macros (exp)
    (if (and (listp exp) (symbol? (car exp)))
        (or (when (gethash (string (car exp)) destr-match-clauses) 
-                 (if (member (car exp) '(test key) :test #'symbol-eq) 
+                 (if (member (car exp) '(test take) :test #'symbol-eq) 
                      (list (first exp) (expand-macros (second exp)) (third exp)) 
                      (cons (car exp) (mapcar #'expand-macros (cdr exp)))))
            (multiple-value-bind (a b) (macroexpand-1 exp)
@@ -86,6 +84,7 @@
                (match ,rest))
         `(not (cdr list)))))
 
+;; here be dragons
 (defun bind-multiple (sym rest type &optional fun)
    (if (not rest)
       `(when list (setf ,sym list) t)
@@ -116,7 +115,6 @@
                       (setf list ,x))
                ,r))))
 
-;; here be dragons
 (defun generate-bind-body (sym rest type &optional fun)
    (if single-mode
        (bind-single sym rest type fun)
@@ -126,7 +124,7 @@
    (if (listp (car exp))
        (aif (gethash (string (caar exp)) destr-match-clauses)
             (funcall it (cdar exp) (cdr exp))
-            (error "stuff is seriously messed up here: ~a" exp)) 
+           `(match ((sublist ,@(car exp)) ,@(cdr exp)))) 
        (if (stringp (car exp))
            (generate-match-code exp)
            (if (symbol? (car exp)) 
@@ -134,12 +132,6 @@
                (generate-atom-code exp)))))
 
 ;; clauses
-;;   choice - matches forms, takes the first to work, analogous to parmesan choice
-;;   single - causes it to match only one form
-;;   multiple - causes it to match any number of forms
-;;   optional - if it matches, take that out of the list, keep matching either way
-;;   test - the form must match the condition described as well as the structure of the match
-;;   key - same as test, except the result of the function is bound instead
 
 (def-match-clause optional (forms rest)
    (if (not rest)
@@ -175,12 +167,20 @@
           `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
            (generate-bind-body (car var) rest 'test (second var)))))
 
-(def-match-clause key (var rest)
+(def-match-clause take (var rest)
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (bind-single (second (first var)) rest 'test (second var))
        (if (not rest)
           `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
            (generate-bind-body (car var) rest 'key (second var)))))
+
+(def-match-clause sublist (forms rest)
+   (if (not rest) 
+      `(when (and (car list) (listp (car list)))
+             (when (let ((list (car list))) (match ,forms)) t))
+      `(when (and (car list) (listp (car list)))
+             (when (let ((list (car list))) (match ,forms))
+                   (let ((list (cdr list))) (match ,rest))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
