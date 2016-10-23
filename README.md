@@ -36,6 +36,21 @@ elements, but ones that only match one item of the list will not be lists themse
 (destructuring-match '(1 2 3 4) (x y rest) (list x y rest)) => (1 2 (3 4))
 ```
 
+```
+(destructuring-match '(a b c d e f) (x 'd y) (list x y)) => ((a b c) (e f))
+```
+
+```
+(destructuring-match '(a b c (d e f g)) (x (y 'f z)) (list x y z)) => ((a b c) (d e) g)
+```
+
+```
+(destructuring-match 
+   (split " " "If You Give a Mouse a Cookie")
+   ("if" "you" verb "a" noun "a" object)
+   (list verb noun object)) => ("Give" "Mouse" "Cookie")
+```
+
 ### edge cases
 You can use the same variable twice, or as many times as you want. The value after matching will be the binding evaluated last. This allows you to use `_` for values you don't care about.
 

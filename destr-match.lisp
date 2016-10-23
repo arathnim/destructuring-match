@@ -12,11 +12,9 @@
 
 ;; TODO
 ;; [w] fill out the README with examples and documentation
-;; [x] full literal value matching, using quotes for symbols
 ;; [ ] another layer of expansion so you can overload macro names
 ;; [ ] key macros
 ;; [ ] tests
-;; [x] mixed binding-mode
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter string-mode 'string)
@@ -54,7 +52,7 @@
 
 (defun match-test (str)
    (case string-mode
-      ((t)            `(equalp  ,str (car list)))
+      (string         `(equalp  ,str (car list)))
       (symbol         `(eq ',(intern (string-upcase str)) (car list)))
       (case-sensitive `(string= ,str (car list)))
       (regex          `(cl-ppcre:scan ,str (car list)))
