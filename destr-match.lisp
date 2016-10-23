@@ -1,6 +1,4 @@
 (proclaim '(optimize (speed 3) (safety 0) (debug 0) (space 0)))
-;(declaim #+sbcl(sb-ext:muffle-conditions style-warning))
-;(declaim #+sbcl(sb-ext:muffle-conditions warning))
 
 (ql:quickload '(alexandria iterate anaphora cl-ppcre) :silent t)
 
@@ -15,6 +13,8 @@
 ;; [ ] another layer of expansion so you can overload macro names
 ;; [ ] key macros
 ;; [ ] tests
+;; [?] structs
+;; [?} hashtables
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter string-mode 'string)
