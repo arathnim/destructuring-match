@@ -1,0 +1,29 @@
+intro
+   destructuring in general
+   destructuring-bind
+general structure and invocation
+   destructuring-match
+   destructuring-match-switch
+   defun and defmacro
+   aliases bind, switch
+   on-failure option
+literal values and free variables
+   what are they?
+   single and multiple
+   literal strings
+      string-mode option
+   literal symbols
+   literal lists
+   binding-mode option
+   other values (numbers, keywords, ect.)
+switch and optional
+test and take
+other structures
+   sublist matching
+   structures
+   hash tables
+key macros
+   key
+   symbol-key
+rolling your own clauses
+   number-designator example

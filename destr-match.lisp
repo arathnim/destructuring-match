@@ -9,12 +9,12 @@
 (in-package destr-match)
 
 ;; TODO
-;; [w] fill out the README with examples and documentation
+;; [ ] fill out the README with examples and documentation
 ;; [ ] another layer of expansion so you can overload macro names
+;;        primitives vs. clauses?
 ;; [ ] key macros
-;; [ ] tests
-;; [?] structs
-;; [?} hashtables
+;; [ ] short aliases - bind, switch, defun, defmacro
+;; [ ] type primitive (type name value)
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter string-mode 'string)
