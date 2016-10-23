@@ -3,28 +3,43 @@ A small macro to destructure lists based on literal values and tests. Useful in 
 and parsing command syntax, as in irc bots or other text interfaces.
 
 ## usage
-`(destructuring-match (key string-mode single fail) expression match-form (rest body))`
+`(destructuring-match (key string-mode binding-mode on-failure) expression match-form body)`
 
 ### options
 `string-mode` changes how literal strings and list elements are compared.
 
-* `t` is the default value, strings match other strings without case sensitivity (compared with `equalp`)
+* `string` is the default value, strings match other strings without case sensitivity (as if compared with `equalp`)
 * `symbol` - literal strings (`"foo"`) match symbols of the same name (mixed-case symbols are not matched)
-* `case-sensitive` should be pretty obvious
-* `regex` - the value in the matching form is used as a regex
+* `case-sensitive`
+* `regex`
 
-`single` determines if free variables by default match a single list element or multiple. Should be `t` or `nil`.
+`binding-mode` determines if free variables by default match a single list element or multiple.
+* `single` - free variables match only a single element of the list, unless modified by `multiple`, as in `(multiple foo)`
+* `multiple` - free variables match one or more elements of the list, and are always lists, unless the
+variable is designated as `single`
+* `mixed` - the default, both `single` and `multiple` modifiers may be used on free varibles, unmodified ones can match any number of
+elements, but ones that only match one item of the list will not be lists themselves.
 
-`fail` is evaluated and returned if the match fails. `nil` by default.
+`on-failure` is evaluated and returned if the match fails. `nil` by default.
 
 ### clauses
-* `choice &rest forms` matches any number of forms, takes the first to work
+* `choice &rest forms` matches the first form in the list that matches
 * `single var` matches only one element of the list
 * `multiple var` matches a list of elements
 * `optional &rest forms` optionally matches all forms, sequentially
 * `test var function` makes the form match the condition described as well as the structure of the match
 * `take var function` same as test, except the result of the function is bound to the var instead of the normal result
 * `sublist &rest forms` starts matching a sublist
+
+### examples
+```
+(destructuring-match '(1 2 3 4) (x y rest) (list x y rest)) => (1 2 (3 4))
+```
+
+### edge cases
+You can use the same variable twice, or as many times as you want. The value after matching will be the binding evaluated last. This allows you to use `_` for values you don't care about.
+
+Using already bound lexical variables is fine, they'll be shadowed by the new binding, as normal.
 
 ## dependencies and installation
 
