@@ -4,8 +4,10 @@ intro
 general structure and invocation
    destructuring-match
    destructuring-match-switch
-   defun and defmacro
-   aliases bind, switch
+   extras
+      using the extra package
+      bind and switch aliases
+      defun and defmacro      
    on-failure option
 literal values and free variables
    what are they?

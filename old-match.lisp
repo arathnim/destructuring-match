@@ -4,13 +4,8 @@
 
 (defpackage destr-match
   (:nicknames destructuring-match)
-  (:use cl iterate anaphora)
-  (:export destructuring-match destructuring-match-switch))
-
-(defpackage destr-match-extras
-  (:use destructuring-match)
-  (:export bind switch defun))
-
+  (:use cl alexandria iterate anaphora)
+  (:export destructuring-match defun-match destructuring-match-switch))
 (in-package destr-match)
 
 ;; TODO
@@ -18,6 +13,8 @@
 ;; [ ] another layer of expansion so you can overload macro names
 ;;        primitives vs. clauses?
 ;; [ ] key macros
+;; [ ] short aliases - bind, switch, defun, defmacro
+;; [ ] type primitive (type name value)
 
 (defparameter destr-match-clauses (make-hash-table :test #'equalp))
 (defparameter string-mode 'string)
@@ -29,10 +26,6 @@
 (defun symbol? (exp) (and (symbolp exp) (not (keywordp exp))))
 
 (defun symbol-eq (x y) (string= (string x) (string y)))
-
-(defmacro with-gensyms ((&rest names) &body body)
-  `(let ,(iter (for n in names) (collect `(,n (gensym))))
-        ,@body))
 
 (defvar free-symbols nil)
 
@@ -47,7 +40,7 @@
               (when b (expand-macros a)))
            (mapcar #'expand-macros exp))
        (if (symbol? exp)
-           (progn (setf free-symbols (append free-symbols (list exp))) exp)
+           (progn (appendf free-symbols (list exp)) exp)
            (if (listp exp)
                (mapcar #'expand-macros exp)
                exp))))
@@ -127,6 +120,7 @@
       (otherwise (error "invalid binding-mode: ~a" binding-mode))))
 
 (defmacro match (exp)
+   (print `(match ,exp))
    (if (listp (car exp))
        (aif (gethash (string (caar exp)) destr-match-clauses)
             (funcall it (cdar exp) (cdr exp))
@@ -155,12 +149,16 @@
 (def-match-clause choice (forms rest)
    (setf (car forms) (if (not (listp (car forms))) (list (car forms)) (car forms)))
    (if (not (cdr forms))
-       `(match ,(if (not rest) (car forms) (append (car forms) rest)))
-       (with-gensyms (foo)
-         `(let ((,foo (match ,(first forms))))
-            (if ,foo ,foo 
-               ,(if (not rest) `(match ((choice ,@(cdr forms)))) 
-                                (append `((choice ,@(cdr forms))) rest)))))))
+       (if (not rest) 
+         `(match ,(car forms))
+         `(match ,(append (car forms) rest)))
+       (if (not rest)
+           (with-gensyms (foo)
+             `(let ((,foo (match ,(first forms))))
+                    (if ,foo ,foo (match ((choice ,@(cdr forms)))))))
+           (with-gensyms (foo)
+             `(let ((,foo (match ,(append (car forms) rest))))
+                    (if ,foo ,foo (match ,(append `((choice ,@(cdr forms))) rest))))))))
 
 (def-match-clause single (var rest)
    (bind-single (car var) rest 'normal))
@@ -183,9 +181,12 @@
            (generate-bind-body (car var) rest 'take (second var)))))
 
 (def-match-clause sublist (forms rest)
-   `(when (and (car list) (listp (car list)))
-      (when (let ((list (car list))) (match ,forms))
-         ,(if (not rest) t `(let ((list (cdr list))) (match ,rest))))))
+   (if (not rest) 
+      `(when (and (car list) (listp (car list)))
+             (when (let ((list (car list))) (match ,forms)) t))
+      `(when (and (car list) (listp (car list)))
+             (when (let ((list (car list))) (match ,forms))
+                   (let ((list (cdr list))) (match ,rest))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
@@ -214,21 +215,13 @@
       `(let ((,f ,exp)) 
              (or ,@(mapcar (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) forms)))))
 
-(in-package destr-match-extras)
-
-;; package dark magic and level hacking starts here
-
-(cl:defmacro bind (cl:&rest args) `(destructuring-match ,@args))
-(cl:defmacro switch (cl:&rest args) `(destructuring-match-switch ,@args))
-
-(cl:defmacro defun (name ll cl:&rest body)
-   (destr-match::with-gensyms (args str)
-      `(cl:progn (cl:eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
+;; NOTE make a special version of the main macro that errors on non-match!
+(defmacro defun-match (name ll &rest body)
+   (with-gensyms (args)
+      `(progn (eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
               (sb-impl::%defun ',name 
-                (sb-int:named-lambda ,name (cl:&rest ,args)
-                 ,(cl:when (cl:stringp (cl:car body)) 
-                           (cl:let ((str (cl:car body))) (cl:setf body (cl:cdr body)) str))
-                  (cl:block ,name
-                     (destructuring-match :on-failure (cl:error "couldn't match args") 
+                (sb-int:named-lambda ,name (&rest ,args)
+                  (block ,name 
+                     (destructuring-match :on-failure (error "couldn't match args!") 
                         ,args ,ll ,@body)))
                 (sb-c:source-location)))))
