@@ -3,17 +3,28 @@ A small macro to destructure lists based on literal values and tests. Useful in 
 and parsing command syntax, as in irc bots or other text interfaces.
 
 ## usage
-`(destructuring-match (key mode single) expression match-form &rest body)`
+`(destructuring-match (key string-mode single fail) expression match-form (rest body))`
+
+### options
+`string-mode` changes how literal strings and list elements are compared.
+
+* `t` is the default value, strings match other strings without case sensitivity (compared with `equalp`)
+* `symbol` - literal strings (`"foo"`) match symbols of the same name (mixed-case symbols are not matched)
+* `case-sensitive` should be pretty obvious
+* `regex` - the value in the matching form is used as a regex
+
+`single` determines if free variables by default match a single list element or multiple. Should be `t` or `nil`.
+
+`fail` is evaluated and returned if the match fails. `nil` by default.
 
 ### clauses
 * `choice &rest forms` matches any number of forms, takes the first to work
-* `single var` causes it to match only one element of the list
-* `optional &rest forms` if it matches, take that out of the list, keep matching either way
+* `single var` matches only one element of the list
+* `multiple var` matches a list of elements
+* `optional &rest forms` optionally matches all forms, sequentially
 * `test var function` makes the form match the condition described as well as the structure of the match
 * `take var function` same as test, except the result of the function is bound to the var instead of the normal result
-
-parsing out key arguments?
-single-key arguments
+* `sublist &rest forms` starts matching a sublist
 
 ## dependencies and installation
 

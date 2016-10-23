@@ -186,37 +186,35 @@
    (mapcar (lambda (x) (list x val)) list))
 
 (defmacro destructuring-match (&rest body)
-   (setf matching-style 'symbol)
-   (setf single-mode nil)
-   (iter (for x from 0 to (length body) by 2)
-         (cond 
-           ((eq :mode (elt body x))
-            (setf matching-style (elt body (+ x 1))))
-           ((eq :single (elt body x))
-            (setf single-mode (elt body (+ x 1))))
-           (t (setf body (subseq body x)) (finish))))
-   (destructuring-bind (exp match-form &rest rest) body
-     (multiple-value-bind (match-form bindings) (expand-main match-form)
-       `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-          (if (match ,match-form)
-              (progn ,@rest) 
-              nil)))))
+   (let ((fail nil))
+    (setf matching-style 'symbol)
+    (setf single-mode nil)
+    (iter (for x from 0 to (length body) by 2)
+          (cond ((eq :mode (elt body x))
+                 (setf matching-style (elt body (+ x 1))))
+                ((eq :fail (elt body x))
+                 (setf fail (elt body (+ x 1))))
+                ((eq :single (elt body x))
+                 (setf single-mode (elt body (+ x 1))))
+                (t (setf body (subseq body x)) (finish))))
+    (destructuring-bind (exp match-form &rest rest) body
+      (multiple-value-bind (match-form bindings) (expand-main match-form)
+        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+           (if (match ,match-form)
+               (progn ,@rest) 
+               ,fail))))))
 
 (defmacro destructuring-match-switch (exp &rest forms)
    (with-gensyms (f)
       `(let ((,f ,exp)) 
-             (or 
-               ,@(mapcar 
-                  (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) 
-                  forms)))))
+             (or ,@(mapcar (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) forms)))))
 
 ;; NOTE make a special version of the main macro that errors on non-match!
-;;      maybe a way to change the mode/style as well
 (defmacro defun-match (name ll &rest body)
    (with-gensyms (args)
       `(progn (eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
               (sb-impl::%defun ',name 
                 (sb-int:named-lambda ,name (&rest ,args)
                   (block ,name 
-                     (destructuring-match ,args ,ll ,@body)))
+                     (destructuring-match :single t ,args ,ll ,@body)))
                 (sb-c:source-location)))))
