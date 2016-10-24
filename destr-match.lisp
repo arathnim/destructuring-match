@@ -18,6 +18,8 @@
 ;; [x] another layer of expansion so you can overload macro names
 ;;        primitives vs. clauses?
 ;; [ ] key macros
+;; [ ] eliminate (and list) checks
+;; [ ] defmacro redefinition
 
 (defparameter clauses (make-hash-table :test #'equalp))
 (defparameter primitives (make-hash-table :test #'equalp))
@@ -75,13 +77,13 @@
   `(when (and list ,(match-test (car exp)))
         ,(if (not (cdr exp)) 't
             `(let ((list (cdr list)))
-                   (match ,(cdr exp))))))
+                  ,(match (cdr exp))))))
 
 (defun generate-atom-code (exp)
   `(when (and list (equalp ,(car exp) (car list)))
         ,(if (not (cdr exp)) 't
            `(let ((list (cdr list)))
-                  (match ,(cdr exp))))))
+                 ,(match (cdr exp))))))
 
 (defun bind-single (sym rest type &optional fun)
   `(when ,(if (eq type 'normal) 
@@ -90,7 +92,7 @@
       (setf ,sym (car list))
      ,(if rest 
         `(let ((list (cdr list)))
-               (match ,rest))
+              ,(match rest))
         `(not (cdr list)))))
 
 ;; here be dragons. bad ones.
@@ -105,7 +107,7 @@
                   ,loop
                       (setf list (cdr list))
                       (when (not list) (go ,fail))
-                      (setf ,w (match ,rest))
+                      (setf ,w ,(match rest))
                      ,(case type
                          (normal `(when (eq ,w t) (go ,succeed)))
                          (test   `(when (and (eq ,w t) (funcall ,fun ,sym)) (go ,succeed)))
@@ -132,45 +134,43 @@
       (mixed (bind-multiple sym rest type fun t))
       (otherwise (error "invalid binding-mode: ~a" binding-mode))))
 
-(defmacro match (exp)
-   (print `(match ,exp))
+(defun match (exp)
    (if (listp (car exp))
        (aif (gethash (string (caar exp)) primitives)
             (funcall it (cdar exp) (cdr exp))
-            (when exp `(match ((sublist ,@(car exp)) ,@(cdr exp))))) 
+            (when exp (match `((sublist ,@(car exp)) ,@(cdr exp))))) 
        (if (stringp (car exp))
            (generate-match-code exp)
            (if (symbol? (car exp)) 
                (generate-bind-body (car exp) (cdr exp) 'normal)
                (generate-atom-code exp)))))
 
-;; clauses
+;; primitives
 
 (def-match-primitive quote (forms rest)
    `(when (and list (eq ',(car forms) (car list)))
          ,(if (not rest) `(not (cdr list))
              `(let ((list (cdr list)))
-                    (match ,rest)))))
+                   ,(match rest)))))
 
 (def-match-primitive optional (forms rest)
    (if (not rest)
-      `(match ,forms)
+       (match forms)
        (with-gensyms (foo)
-          `(let ((,foo (match ,(append forms rest))))
-                 (if ,foo ,foo (match ,rest))))))
+          `(let ((,foo ,(match (append forms rest))))
+                 (if ,foo ,foo ,(match rest))))))
 
 (def-match-primitive choice (forms rest)
-   (print `(choice ,forms ,rest))
-   (setf (car forms) (if (or (not (listp (car forms))) (eq (caar forms) 'quote)) 
-                         (list (car forms))
-                         (car forms)))
+   (when (or (not (listp (car forms))) (eq (caar forms) 'quote))
+         (setf (car forms) (list (car forms))))
    (if (not (cdr forms))
-       `(match ,(if (not rest) (car forms) (append (car forms) rest)))
+       (match (if (not rest) (car forms) (append (car forms) rest)))
        (with-gensyms (foo)
-         `(let ((,foo (match ,(first forms))))
-            (if ,foo ,foo 
-               ,(if (not rest) `(match ((choice ,@(cdr forms)))) 
-                                (append `((choice ,@(cdr forms))) rest)))))))
+         `(let ((,foo ,(match (if (not rest) (first forms) (append (car forms) rest)))))
+                (if ,foo ,foo
+                    ,(match (if (not rest) 
+                               `((choice ,@(cdr forms))) 
+                                (append `((choice ,@(cdr forms))) rest))))))))
 
 (def-match-primitive single (var rest)
    (bind-single (car var) rest 'normal))
@@ -194,28 +194,27 @@
 
 (def-match-primitive sublist (forms rest)
    `(when (and (car list) (listp (car list)))
-      (when (let ((list (car list))) (match ,forms))
-         ,(if (not rest) t `(let ((list (cdr list))) (match ,rest))))))
+      (when (let ((list (car list))) ,(match forms))
+         ,(if (not rest) t `(let ((list (cdr list))) ,(match rest))))))
 
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
 
 (defmacro destructuring-match (&rest body)
-   (let ((fail nil) (s 'string) (b 'mixed))
+   (let ((fail nil) (string-mode 'string) (binding-mode 'mixed))
     (iter (for x from 0 to (length body) by 2)
           (cond ((eq :string-mode (elt body x))
-                 (setf s (elt body (+ x 1))))
+                 (setf string-mode (elt body (+ x 1))))
                 ((eq :on-failure (elt body x))
                  (setf fail (elt body (+ x 1))))
                 ((eq :binding-mode (elt body x))
-                 (setf b (elt body (+ x 1))))
+                 (setf binding-mode (elt body (+ x 1))))
                 (t (setf body (subseq body x)) (finish))))
     (destructuring-bind (exp match-form &rest rest) body
       (multiple-value-bind (match-form bindings) (expand-main match-form)
-        `(let ,(append `((list ,exp) (string-mode ',s) (binding-mode ',b)) 
-                        (simple-pair bindings nil))
-           (if (match ,match-form)
-               (progn ,@rest)
+        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+           (if ,(match match-form)
+                (progn ,@rest)
                ,fail))))))
 
 (defmacro destructuring-match-switch (exp &rest forms)
