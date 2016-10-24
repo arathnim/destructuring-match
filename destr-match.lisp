@@ -15,10 +15,7 @@
 
 ;; TODO
 ;; [ ] fill out the README with examples and documentation
-;; [x] another layer of expansion so you can overload macro names
-;;        primitives vs. clauses?
 ;; [ ] key macros
-;; [ ] eliminate (and list) checks
 ;; [ ] defmacro redefinition
 
 (defparameter clauses (make-hash-table :test #'equalp))
@@ -50,7 +47,7 @@
                        ((symbol-eq 'quote (car exp)) (return-from expand-macros exp))
                        (t (cons (car exp) (mapcar #'expand-macros (cdr exp))))))
            (awhen (gethash (string (car exp)) clauses)
-                  (expand-macros (funcall it (cdr exp))))
+                  (expand-macros (apply it (cdr exp))))
            (multiple-value-bind (a b) (macroexpand-1 exp)
               (when b (expand-macros a)))
            (mapcar #'expand-macros exp))
@@ -74,13 +71,13 @@
       (otherwise       (error "something went very wrong"))))
 
 (defun generate-match-code (exp)
-  `(when (and list ,(match-test (car exp)))
-        ,(if (not (cdr exp)) 't
+  `(when ,(match-test (car exp))
+         ,(if (not (cdr exp)) 't
             `(let ((list (cdr list)))
                   ,(match (cdr exp))))))
 
 (defun generate-atom-code (exp)
-  `(when (and list (equalp ,(car exp) (car list)))
+  `(when (equalp ,(car exp) (car list))
         ,(if (not (cdr exp)) 't
            `(let ((list (cdr list)))
                  ,(match (cdr exp))))))
@@ -148,7 +145,7 @@
 ;; primitives
 
 (def-match-primitive quote (forms rest)
-   `(when (and list (eq ',(car forms) (car list)))
+   `(when (eq ',(car forms) (car list))
          ,(if (not rest) `(not (cdr list))
              `(let ((list (cdr list)))
                    ,(match rest)))))
@@ -179,6 +176,7 @@
    (bind-multiple (car var) rest 'normal))
 
 (def-match-primitive test (var rest)
+   (print `(test ,var ,rest))
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (bind-single (second (first var)) rest 'test (second var))
        (if (not rest)
@@ -212,6 +210,9 @@
                 (t (setf body (subseq body x)) (finish))))
     (destructuring-bind (exp match-form &rest rest) body
       (multiple-value-bind (match-form bindings) (expand-main match-form)
+         (when (and (listp match-form) (symbol? (car match-form)) 
+                    (gethash (string (car match-form)) primitives))
+               (setf match-form (list match-form)))
         `(let ,(append `((list ,exp)) (simple-pair bindings nil))
            (if ,(match match-form)
                 (progn ,@rest)
