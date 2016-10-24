@@ -223,6 +223,16 @@
       `(let ((,f ,exp)) 
              (or ,@(mapcar (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) forms)))))
 
+;; some helpful clauses
+
+(def-match-clause bind (x y) `(test (single ,x) (lambda (x) (equalp x y))))
+
+(defun generate-key (forms order))
+
+(def-match-clause key (&rest args)
+   (destructuring-match args ((optional (bind ord :ordered)) key-forms)
+      (generate-key key-forms ord )))
+
 (in-package destr-match-extras)
 
 ;; package dark magic and level hacking starts here
