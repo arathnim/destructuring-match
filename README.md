@@ -4,6 +4,7 @@ and parsing command syntax, as in irc bots or other text interfaces.
 
 ## usage
 `(destructuring-match (key string-mode binding-mode on-failure) expression match-form body)`
+
 `(destructuring-match-switch expression match-forms)`
 
 ### options
@@ -74,11 +75,32 @@ elements, but ones that only match one item of the list will not be lists themse
 (destructuring-match '(a b c (d e f g)) (x (y 'f z)) (list x y z)) => ((a b c) (d e) g)
 ```
 
+```
+;; using symbols from the extra package
+
+(defpackage my-package
+   (:shadowing-import-from destr-match-extras bind switch defun defmacro)
+	(:use cl destr-match))
+	
+(in-package my-package)
+
+(bind '(1 2 3 4 5 6) (x y rest) rest) => (3 4 5 6)
+
+;; this is useless but pretty fun
+(defmacro map ((vars '-> body) 'over lists)
+	...)
+	
+(map (x -> (+ x 1)) over '(1 2 3))            => (2 3 4)
+(map (x y -> (+ x y)) over '(1 2 3) '(7 8 9)) => (8 10 12)
+```
+
 
 ### edge cases
 You can use the same variable twice, or as many times as you want. The value after matching will be the binding evaluated last. This allows you to use `_` for values you don't care about.
 
 Using already bound lexical variables is fine, they'll be shadowed by the new binding, as normal.
+
+I have no idea what will happen if you nest `destructuring-match` calls inside the matching form. Probably nothing good.
 
 ## dependencies and installation
 

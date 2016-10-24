@@ -15,16 +15,20 @@
 
 ;; TODO
 ;; [ ] fill out the README with examples and documentation
-;; [ ] another layer of expansion so you can overload macro names
+;; [x] another layer of expansion so you can overload macro names
 ;;        primitives vs. clauses?
 ;; [ ] key macros
 
-(defparameter destr-match-clauses (make-hash-table :test #'equalp))
-(defparameter string-mode 'string)
-(defparameter binding-mode 'mixed)
+(defparameter clauses (make-hash-table :test #'equalp))
+(defparameter primitives (make-hash-table :test #'equalp))
+(defvar string-mode nil)
+(defvar binding-mode nil)
 
 (defmacro def-match-clause (name ll &rest rest)
-   `(setf (gethash ,(string name) destr-match-clauses) (lambda ,ll ,@rest)))
+   `(setf (gethash ,(string name) clauses) (lambda ,ll ,@rest)))
+
+(defmacro def-match-primitive (name ll &rest rest)
+   `(setf (gethash ,(string name) primitives) (lambda ,ll ,@rest)))
 
 (defun symbol? (exp) (and (symbolp exp) (not (keywordp exp))))
 
@@ -38,11 +42,13 @@
 
 (defun expand-macros (exp)
    (if (and (listp exp) (symbol? (car exp)))
-       (or (when (gethash (string (car exp)) destr-match-clauses)
+       (or (when (gethash (string (car exp)) primitives)
                  (cond ((member (car exp) '(test take) :test #'symbol-eq) 
                           (list (first exp) (expand-macros (second exp)) (third exp)))
                        ((symbol-eq 'quote (car exp)) (return-from expand-macros exp))
                        (t (cons (car exp) (mapcar #'expand-macros (cdr exp))))))
+           (awhen (gethash (string (car exp)) clauses)
+                  (expand-macros (funcall it (cdr exp))))
            (multiple-value-bind (a b) (macroexpand-1 exp)
               (when b (expand-macros a)))
            (mapcar #'expand-macros exp))
@@ -87,7 +93,7 @@
                (match ,rest))
         `(not (cdr list)))))
 
-;; here be dragons
+;; here be dragons. bad ones.
 (defun bind-multiple (sym rest type &optional fun strip)
    (if (not rest)
       `(when list (setf ,sym (if (not (cdr list)) (car list) list)) t)
@@ -127,8 +133,9 @@
       (otherwise (error "invalid binding-mode: ~a" binding-mode))))
 
 (defmacro match (exp)
+   (print `(match ,exp))
    (if (listp (car exp))
-       (aif (gethash (string (caar exp)) destr-match-clauses)
+       (aif (gethash (string (caar exp)) primitives)
             (funcall it (cdar exp) (cdr exp))
             (when exp `(match ((sublist ,@(car exp)) ,@(cdr exp))))) 
        (if (stringp (car exp))
@@ -139,21 +146,24 @@
 
 ;; clauses
 
-(def-match-clause quote (forms rest)
+(def-match-primitive quote (forms rest)
    `(when (and list (eq ',(car forms) (car list)))
-         ,(if (not rest) 't
+         ,(if (not rest) `(not (cdr list))
              `(let ((list (cdr list)))
                     (match ,rest)))))
 
-(def-match-clause optional (forms rest)
+(def-match-primitive optional (forms rest)
    (if (not rest)
       `(match ,forms)
        (with-gensyms (foo)
           `(let ((,foo (match ,(append forms rest))))
                  (if ,foo ,foo (match ,rest))))))
 
-(def-match-clause choice (forms rest)
-   (setf (car forms) (if (not (listp (car forms))) (list (car forms)) (car forms)))
+(def-match-primitive choice (forms rest)
+   (print `(choice ,forms ,rest))
+   (setf (car forms) (if (or (not (listp (car forms))) (eq (caar forms) 'quote)) 
+                         (list (car forms))
+                         (car forms)))
    (if (not (cdr forms))
        `(match ,(if (not rest) (car forms) (append (car forms) rest)))
        (with-gensyms (foo)
@@ -162,27 +172,27 @@
                ,(if (not rest) `(match ((choice ,@(cdr forms)))) 
                                 (append `((choice ,@(cdr forms))) rest)))))))
 
-(def-match-clause single (var rest)
+(def-match-primitive single (var rest)
    (bind-single (car var) rest 'normal))
 
-(def-match-clause multiple (var rest)
+(def-match-primitive multiple (var rest)
    (bind-multiple (car var) rest 'normal))
 
-(def-match-clause test (var rest)
+(def-match-primitive test (var rest)
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (bind-single (second (first var)) rest 'test (second var))
        (if (not rest)
           `(when (and list (funcall ,(second var) list)) (setf ,(first var) list) t)
            (generate-bind-body (car var) rest 'test (second var)))))
 
-(def-match-clause take (var rest)
+(def-match-primitive take (var rest)
    (if (and (listp (first var)) (symbol-eq (car (first var)) 'single))
        (bind-single (second (first var)) rest 'test (second var))
        (if (not rest)
           `(awhen (and list (funcall ,(second var) list)) (setf ,(first var) it) t)
            (generate-bind-body (car var) rest 'take (second var)))))
 
-(def-match-clause sublist (forms rest)
+(def-match-primitive sublist (forms rest)
    `(when (and (car list) (listp (car list)))
       (when (let ((list (car list))) (match ,forms))
          ,(if (not rest) t `(let ((list (cdr list))) (match ,rest))))))
@@ -191,22 +201,21 @@
    (mapcar (lambda (x) (list x val)) list))
 
 (defmacro destructuring-match (&rest body)
-   (let ((fail nil))
-    (setf string-mode 'string)
-    (setf binding-mode 'mixed)
+   (let ((fail nil) (s 'string) (b 'mixed))
     (iter (for x from 0 to (length body) by 2)
           (cond ((eq :string-mode (elt body x))
-                 (setf string-mode (elt body (+ x 1))))
+                 (setf s (elt body (+ x 1))))
                 ((eq :on-failure (elt body x))
                  (setf fail (elt body (+ x 1))))
                 ((eq :binding-mode (elt body x))
-                 (setf binding-mode (elt body (+ x 1))))
+                 (setf b (elt body (+ x 1))))
                 (t (setf body (subseq body x)) (finish))))
     (destructuring-bind (exp match-form &rest rest) body
       (multiple-value-bind (match-form bindings) (expand-main match-form)
-        `(let ,(append `((list ,exp)) (simple-pair bindings nil))
+        `(let ,(append `((list ,exp) (string-mode ',s) (binding-mode ',b)) 
+                        (simple-pair bindings nil))
            (if (match ,match-form)
-               (progn ,@rest) 
+               (progn ,@rest)
                ,fail))))))
 
 (defmacro destructuring-match-switch (exp &rest forms)
@@ -222,7 +231,7 @@
 (cl:defmacro switch (cl:&rest args) `(destructuring-match-switch ,@args))
 
 (cl:defmacro defun (name ll cl:&rest body)
-   (destr-match::with-gensyms (args str)
+   (destr-match::with-gensyms (args)
       `(cl:progn (cl:eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
               (sb-impl::%defun ',name 
                 (sb-int:named-lambda ,name (cl:&rest ,args)
