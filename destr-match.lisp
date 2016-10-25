@@ -13,11 +13,6 @@
 
 (in-package destr-match)
 
-;; TODO
-;; [ ] fill out the README with examples and documentation
-;; [ ] key macros
-;; [ ] defmacro redefinition
-
 (defparameter clauses (make-hash-table :test #'equalp))
 (defparameter primitives (make-hash-table :test #'equalp))
 (defvar string-mode nil)
@@ -151,11 +146,9 @@
                    ,(match rest)))))
 
 (def-match-primitive optional (forms rest)
-   (if (not rest)
-       (match forms)
-       (with-gensyms (foo)
-          `(let ((,foo ,(match (append forms rest))))
-                 (if ,foo ,foo ,(match rest))))))
+   (with-gensyms (foo)
+     `(let ((,foo ,(match (if (not rest) forms (append forms rest)))))
+        (if ,foo ,foo ,(if (not rest) t (match rest))))))
 
 (def-match-primitive choice (forms rest)
    (when (or (not (listp (car forms))) (eq (caar forms) 'quote))
@@ -220,18 +213,42 @@
 
 (defmacro destructuring-match-switch (exp &rest forms)
    (with-gensyms (f)
-      `(let ((,f ,exp)) 
+      `(let ((,f ,exp))
              (or ,@(mapcar (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) forms)))))
 
 ;; some helpful clauses
 
-(def-match-clause bind (x y) `(test (single ,x) (lambda (x) (equalp x y))))
+(def-match-clause bind (x y) `(test (single ,x) (lambda (x) (equalp x ',y))))
 
-(defun generate-key (forms order))
+(defun as-keyword (symbol)
+   (intern (symbol-name symbol) :keyword))
+
+(defun generate-key (var)
+   (if (symbolp var)
+      `(,(as-keyword var) (single ,var))
+       (if (not (listp var))
+           (error "weird stuff in key clause: ~a" var) 
+           (destructuring-bind (sym &key names and-key) var
+              nil))))
+
+(defun generate-key-structure (forms ord)
+   (if (not (cdr forms))
+      `(optional ,@(generate-key (car forms))) 
+       (if ord
+          `(optional
+            ,@(append (generate-key (car forms)) (generate-key-structure (cdr forms) ord)))
+          `(optional (choice
+            ,@(iter (for x in forms)
+                    (collect
+                     (append (generate-key x)
+                             (list (generate-key-structure (remove x forms) ord))))))))))
 
 (def-match-clause key (&rest args)
-   (destructuring-match args ((optional (bind ord :ordered)) key-forms)
-      (generate-key key-forms ord )))
+   (let ((ord nil))
+         (when (eq (car args) :ordered)
+               (setf ord t)
+               (setf args (cdr args)))
+         (generate-key-structure args ord)))
 
 (in-package destr-match-extras)
 
