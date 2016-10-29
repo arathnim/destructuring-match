@@ -34,7 +34,7 @@ elements, but ones that only match one item of the list will not be lists themse
 * `sublist &rest forms` starts matching a sublist
 
 ### examples
-```
+```cl
 (destructuring-match 
    (split " " "If You Give a Mouse a Cookie")
    ("if" "you" verb "a" noun "a" object)
@@ -52,7 +52,7 @@ elements, but ones that only match one item of the list will not be lists themse
 (cookie "if you give a pig a purple pancake") => ("give" "pig" ("purple" "pancake"))
 ```
 
-```
+```cl
 (defun cookie (str)
    (destructuring-match-switch (split " " str)
       (("if" "you" "give" "a" noun (switch "a" "an") object) (list "give" noun object))
@@ -63,19 +63,19 @@ elements, but ones that only match one item of the list will not be lists themse
 (cookie "if you take a mouse the movies")    => ("take" "mouse" "movies")
 ```
 
-```
+```cl
 (destructuring-match '(1 2 3 4) (x y rest) (list x y rest)) => (1 2 (3 4))
 ```
 
-```
+```cl
 (destructuring-match '(a b c d e f) (x 'd y) (list x y)) => ((a b c) (e f))
 ```
 
-```
+```cl
 (destructuring-match '(a b c (d e f g)) (x (y 'f z)) (list x y z)) => ((a b c) (d e) g)
 ```
 
-```
+```cl
 ;; using symbols from the extra package
 
 (defpackage my-package
@@ -99,8 +99,6 @@ elements, but ones that only match one item of the list will not be lists themse
 You can use the same variable twice, or as many times as you want. The value after matching will be the binding evaluated last. This allows you to use `_` for values you don't care about.
 
 Using already bound lexical variables is fine, they'll be shadowed by the new binding, as normal.
-
-I have no idea what will happen if you nest `destructuring-match` calls inside the matching form. Probably nothing good.
 
 ## dependencies and installation
 

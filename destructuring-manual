@@ -1,6 +1,3 @@
-intro
-   destructuring in general
-   destructuring-bind
 general structure and invocation
    destructuring-match
    destructuring-match-switch
@@ -18,14 +15,16 @@ literal values and free variables
    literal lists
    binding-mode option
    other values (numbers, keywords, ect.)
-switch and optional
-test and take
-other structures
+claueses
+   switch and optional
+   test and take
    sublist matching
-   structures
-   hash tables
-key macros
-   key
-   symbol-key
+   key macros
+      key
+      symbol-key
 rolling your own clauses
    number-designator example
+examples
+   If you give a mouse a cookie
+   lispbot "give"
+   mushy "look"

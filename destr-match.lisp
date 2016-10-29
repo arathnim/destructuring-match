@@ -8,10 +8,16 @@
   (:export destructuring-match destructuring-match-switch))
 
 (defpackage destr-match-extras
-  (:use destructuring-match)
-  (:export bind switch defun))
+  (:shadow defun defmacro)
+  (:use cl destructuring-match)
+  (:export bind switch defun defmacro))
 
 (in-package destr-match)
+
+;; TODO
+;; multiple-bind for test and key
+;; move wrapping code to match, instead
+;; better error handling
 
 (defparameter clauses (make-hash-table :test #'equalp))
 (defparameter primitives (make-hash-table :test #'equalp))
@@ -26,7 +32,9 @@
 
 (defun symbol? (exp) (and (symbolp exp) (not (keywordp exp))))
 
-(defun symbol-eq (x y) (string= (string x) (string y)))
+(defun symbol-eq (x y)
+   "Compares the names of symbols, to prevent package issues"
+   (string= (string x) (string y)))
 
 (defmacro with-gensyms ((&rest names) &body body)
   `(let ,(iter (for n in names) (collect `(,n (gensym))))
@@ -35,6 +43,7 @@
 (defvar free-symbols nil)
 
 (defun expand-macros (exp)
+   "Expand clauses and macros, append free symbols into free-symbols"
    (if (and (listp exp) (symbol? (car exp)))
        (or (when (gethash (string (car exp)) primitives)
                  (cond ((member (car exp) '(test take) :test #'symbol-eq) 
@@ -53,11 +62,13 @@
                exp))))
 
 (defun expand-main (exp)
+   "Expands matching code, collects free symbols for binding"
    (let* ((free-symbols nil)
           (exp (expand-macros exp)))
           (values exp (delete-duplicates free-symbols))))
 
-(defun match-test (str)
+(defun string-test (str)
+   "Generates the correct code for string comparison from string-mode"
    (case string-mode
       (string         `(equalp  ,str (car list)))
       (symbol         `(eq ',(intern (string-upcase str)) (car list)))
@@ -65,19 +76,17 @@
       (regex          `(cl-ppcre:scan ,str (car list)))
       (otherwise       (error "something went very wrong"))))
 
-(defun generate-match-code (exp)
-  `(when ,(match-test (car exp))
+(defun generate-atom-code (exp)
+   "Generates the code to match all atoms"
+  `(when ,(if (stringp (car exp)) 
+              (string-test (car exp)) 
+             `(equalp ,(car exp) (car list)))
          ,(if (not (cdr exp)) 't
             `(let ((list (cdr list)))
                   ,(match (cdr exp))))))
 
-(defun generate-atom-code (exp)
-  `(when (equalp ,(car exp) (car list))
-        ,(if (not (cdr exp)) 't
-           `(let ((list (cdr list)))
-                 ,(match (cdr exp))))))
-
 (defun bind-single (sym rest type &optional fun)
+   "Binds a single element of the list to sym"
   `(when ,(if (eq type 'normal) 
              `(car list) 
              `(and (car list) (funcall ,fun (car list))))
@@ -89,6 +98,7 @@
 
 ;; here be dragons. bad ones.
 (defun bind-multiple (sym rest type &optional fun strip)
+   "Binds multiple elements of the list to sym, as determined by the structure"
    (if (not rest)
       `(when list (setf ,sym (if (not (cdr list)) (car list) list)) t)
        (with-gensyms (x w r p f loop succeed fail end)
@@ -120,6 +130,7 @@
                ,r))))
 
 (defun generate-bind-body (sym rest type &optional fun)
+   "Dispatches to bind-single or bind-multiple based on binding-mode"
    (case binding-mode
       (single (bind-single sym rest type fun))
       (multiple (bind-multiple sym rest type fun))
@@ -127,15 +138,14 @@
       (otherwise (error "invalid binding-mode: ~a" binding-mode))))
 
 (defun match (exp)
+   "Base of the macro, calls primitives and binds variables"
    (if (listp (car exp))
        (aif (gethash (string (caar exp)) primitives)
             (funcall it (cdar exp) (cdr exp))
             (when exp (match `((sublist ,@(car exp)) ,@(cdr exp))))) 
-       (if (stringp (car exp))
-           (generate-match-code exp)
-           (if (symbol? (car exp)) 
-               (generate-bind-body (car exp) (cdr exp) 'normal)
-               (generate-atom-code exp)))))
+       (if (symbol? (car exp))
+           (generate-bind-body (car exp) (cdr exp) 'normal)
+           (generate-atom-code exp))))
 
 ;; primitives
 
@@ -192,6 +202,7 @@
    (mapcar (lambda (x) (list x val)) list))
 
 (defmacro destructuring-match (&rest body)
+   "destructuring-match (key string-mode binding-mode on-failure) expression match-form body"
    (let ((fail nil) (string-mode 'string) (binding-mode 'mixed))
     (iter (for x from 0 to (length body) by 2)
           (cond ((eq :string-mode (elt body x))
@@ -221,15 +232,20 @@
 (def-match-clause bind (x y) `(test (single ,x) (lambda (x) (equalp x ',y))))
 
 (defun as-keyword (symbol)
+   "Returns a keyword with the same name as symbol"
    (intern (symbol-name symbol) :keyword))
 
 (defun generate-key (var)
+   "Generate the code to match a single key"
    (if (symbolp var)
-      `(,(as-keyword var) (single ,var))
+      `(,(as-keyword var) (single ,var)) ;; (:sym sym)
        (if (not (listp var))
            (error "weird stuff in key clause: ~a" var) 
            (destructuring-bind (sym &key names and-key) var
-              nil))))
+              (if (or names and-key)
+                 `((test ,(if and-key `(single ,and-key) `(single ,(gensym)))
+                         (lambda (x) (member x ',(mapcar #'as-keyword names)))) (single ,sym))
+                  (generate-key sym))))))
 
 (defun generate-key-structure (forms ord)
    (if (not (cdr forms))
@@ -254,17 +270,21 @@
 
 ;; package dark magic and level hacking starts here
 
-(cl:defmacro bind (cl:&rest args) `(destructuring-match ,@args))
-(cl:defmacro switch (cl:&rest args) `(destructuring-match-switch ,@args))
+(cl:defmacro bind (&rest args) `(destructuring-match ,@args))
+(cl:defmacro switch (&rest args) `(destructuring-match-switch ,@args))
 
-(cl:defmacro defun (name ll cl:&rest body)
+(cl:defmacro defun (name ll &rest body)
    (destr-match::with-gensyms (args)
-      `(cl:progn (cl:eval-when (:compile-toplevel) (sb-c:%compiler-defun ',name nil t)) 
-              (sb-impl::%defun ',name 
-                (sb-int:named-lambda ,name (cl:&rest ,args)
-                 ,(cl:when (cl:stringp (cl:car body)) 
-                           (cl:let ((str (cl:car body))) (cl:setf body (cl:cdr body)) str))
-                  (cl:block ,name
-                     (destructuring-match :on-failure (cl:error "couldn't match args") 
-                        ,args ,ll ,@body)))
-                (sb-c:source-location)))))
+      `(cl:defun ,name (&rest ,args)
+         ,(when (stringp (car body)) 
+                (let ((str (car body))) (setf body (cdr body)) str))
+          (destructuring-match :on-failure (error "couldn't match args")
+            ,args ,ll ,@body))))
+
+(cl:defmacro defmacro (name ll &rest body)
+   (destr-match::with-gensyms (args)
+      `(cl:defmacro ,name (&rest ,args)
+         ,(when (stringp (car body)) 
+                (let ((str (car body))) (setf body (cdr body)) str))
+          (destructuring-match :on-failure (error "couldn't match args")
+            ,args ,ll ,@body))))
