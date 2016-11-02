@@ -15,9 +15,10 @@
 (in-package destr-match)
 
 ;; TODO
+;; struct matching
 ;; multiple-bind for test and key
 ;; move wrapping code to match, instead
-;; better error handling
+;; better error handling during macroexpand-time
 
 (defparameter clauses (make-hash-table :test #'equalp))
 (defparameter primitives (make-hash-table :test #'equalp))

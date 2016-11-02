@@ -7,6 +7,10 @@ and parsing command syntax, as in irc bots or other text interfaces.
 
 `(destructuring-match-switch expression match-forms)`
 
+`(destr-match-extras:defun name args body)`
+
+`(destr-match-extras:defmacro name args body)`
+
 ### options
 `string-mode` changes how literal strings and list elements are compared.
 
@@ -53,17 +57,6 @@ elements, but ones that only match one item of the list will not be lists themse
 ```
 
 ```cl
-(defun cookie (str)
-   (destructuring-match-switch (split " " str)
-      (("if" "you" "give" "a" noun (switch "a" "an") object) (list "give" noun object))
-      (("if" "you" "take" "a" noun "to" (optional "the") place) (list "take" noun place))))
-
-(cookie "if you give a mouse a cookie")      => ("give" "mouse" "cookie")
-(cookie "if you take a mouse to school")     => ("take" "mouse" "school")
-(cookie "if you take a mouse the movies")    => ("take" "mouse" "movies")
-```
-
-```cl
 (destructuring-match '(1 2 3 4) (x y rest) (list x y rest)) => (1 2 (3 4))
 ```
 
@@ -93,7 +86,6 @@ elements, but ones that only match one item of the list will not be lists themse
 (map (x -> (+ x 1)) over '(1 2 3))            => (2 3 4)
 (map (x y -> (+ x y)) over '(1 2 3) '(7 8 9)) => (8 10 12)
 ```
-
 
 ### edge cases
 You can use the same variable twice, or as many times as you want. The value after matching will be the binding evaluated last. This allows you to use `_` for values you don't care about.
