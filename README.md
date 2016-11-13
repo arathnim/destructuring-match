@@ -3,13 +3,13 @@ A small macro to destructure lists based on literal values and tests. Useful in 
 and parsing command syntax, as in irc bots or other text interfaces.
 
 ## usage
-`(destructuring-match (key string-mode binding-mode on-failure) expression match-form body)`
+`(bind (key string-mode binding-mode on-failure) match-form expression body)`
 
-`(destructuring-match-switch expression match-forms)`
+`(match expression match-forms)`
 
-`(destr-match-extras:defun name args body)`
+`(destr-match-extras:defun name args (optional docstring) body)`
 
-`(destr-match-extras:defmacro name args body)`
+`(destr-match-extras:defmacro name args (optional docstring) body)`
 
 ### options
 `string-mode` changes how literal strings and list elements are compared.

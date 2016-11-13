@@ -2,22 +2,25 @@
 
 (ql:quickload '(alexandria iterate anaphora cl-ppcre) :silent t)
 
+(defpackage destr-match-core
+  (:use cl iterate anaphora))
+
 (defpackage destr-match
   (:nicknames destructuring-match)
-  (:use cl iterate anaphora)
-  (:export destructuring-match destructuring-match-switch))
+  (:use cl)
+  (:export bind match))
 
 (defpackage destr-match-extras
   (:shadow defun defmacro)
-  (:use cl destructuring-match)
-  (:export bind switch defun defmacro))
+  (:use cl)
+  (:export defun defmacro))
 
-(in-package destr-match)
+(in-package destr-match-core)
 
 ;; TODO
 ;; struct matching
 ;; multiple-bind for test and key
-;; move wrapping code to match, instead
+;; move wrapping/desugaring code to match
 ;; better error handling during macroexpand-time
 
 (defparameter clauses (make-hash-table :test #'equalp))
@@ -202,8 +205,8 @@
 (defun simple-pair (list val)
    (mapcar (lambda (x) (list x val)) list))
 
-(defmacro destructuring-match (&rest body)
-   "destructuring-match (key string-mode binding-mode on-failure) expression match-form body"
+(defmacro bind (&rest body)
+   "(key string-mode binding-mode on-failure) match-form expression body"
    (let ((fail nil) (string-mode 'string) (binding-mode 'mixed))
     (iter (for x from 0 to (length body) by 2)
           (cond ((eq :string-mode (elt body x))
@@ -213,7 +216,7 @@
                 ((eq :binding-mode (elt body x))
                  (setf binding-mode (elt body (+ x 1))))
                 (t (setf body (subseq body x)) (finish))))
-    (destructuring-bind (exp match-form &rest rest) body
+    (destructuring-bind (match-form exp &rest rest) body
       (multiple-value-bind (match-form bindings) (expand-main match-form)
          (when (and (listp match-form) (symbol? (car match-form)) 
                     (gethash (string (car match-form)) primitives))
@@ -223,14 +226,7 @@
                 (progn ,@rest)
                ,fail))))))
 
-(defmacro destructuring-match-switch (exp &rest forms)
-   (with-gensyms (f)
-      `(let ((,f ,exp))
-             (or ,@(mapcar (lambda (x) `(destructuring-match ,f ,(car x) ,@(cdr x))) forms)))))
-
 ;; some helpful clauses
-
-(def-match-clause bind (x y) `(test (single ,x) (lambda (x) (equalp x ',y))))
 
 (defun as-keyword (symbol)
    "Returns a keyword with the same name as symbol"
@@ -267,25 +263,34 @@
                (setf args (cdr args)))
          (generate-key-structure args ord)))
 
-(in-package destr-match-extras)
-
 ;; package dark magic and level hacking starts here
 
-(cl:defmacro bind (&rest args) `(destructuring-match ,@args))
-(cl:defmacro switch (&rest args) `(destructuring-match-switch ,@args))
+(in-package destr-match)
+
+(cl:defmacro bind (&rest forms)
+   `(destr-match-core::bind ,@forms))
+
+;; needs some way to pass key arguments
+(cl:defmacro match (exp &rest forms)
+   (alexandria:with-gensyms (f)
+      `(let ((,f ,exp))
+             (or ,@(mapcar (lambda (x) `(destr-match-core::bind ,(car x) ,f ,@(cdr x))) 
+                           forms)))))
+
+(in-package destr-match-extras)
 
 (cl:defmacro defun (name ll &rest body)
-   (destr-match::with-gensyms (args)
+   (alexandria::with-gensyms (args)
       `(cl:defun ,name (&rest ,args)
          ,(when (stringp (car body)) 
                 (let ((str (car body))) (setf body (cdr body)) str))
-          (destructuring-match :on-failure (error "couldn't match args")
+          (destr-match-core::bind :on-failure (error "couldn't match args")
             ,args ,ll ,@body))))
 
 (cl:defmacro defmacro (name ll &rest body)
-   (destr-match::with-gensyms (args)
+   (alexandria:with-gensyms (args)
       `(cl:defmacro ,name (&rest ,args)
          ,(when (stringp (car body)) 
                 (let ((str (car body))) (setf body (cdr body)) str))
-          (destructuring-match :on-failure (error "couldn't match args")
+          (destr-match-core::bind :on-failure (error "couldn't match args")
             ,args ,ll ,@body))))
