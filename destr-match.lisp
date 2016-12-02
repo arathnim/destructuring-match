@@ -38,7 +38,7 @@
 
 (defun symbol-eq (x y)
    "Compares the names of symbols, to prevent package issues"
-   (string= (string x) (string y)))
+   (and (symbolp x) (symbolp y) (string= (string x) (string y))))
 
 (defmacro with-gensyms ((&rest names) &body body)
   `(let ,(iter (for n in names) (collect `(,n (gensym))))
@@ -154,7 +154,7 @@
 ;; primitives
 
 (def-match-primitive quote (forms rest)
-   `(when (eq ',(car forms) (car list))
+   `(when (symbol-eq ',(car forms) (car list))
          ,(if (not rest) `(not (cdr list))
              `(let ((list (cdr list)))
                    ,(match rest)))))
@@ -222,7 +222,7 @@
                     (gethash (string (car match-form)) primitives))
                (setf match-form (list match-form)))
         `(let ,(append `((list ,exp)) (simple-pair bindings nil))
-           (if ,(match match-form)
+           (if (and (listp list) ,(match match-form))
                 (progn ,@rest)
                ,fail))))))
 
