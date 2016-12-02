@@ -104,7 +104,7 @@
 (defun bind-multiple (sym rest type &optional fun strip)
    "Binds multiple elements of the list to sym, as determined by the structure"
    (if (not rest)
-      `(when list (setf ,sym (if (not (cdr list)) (car list) list)) t)
+      `(when list (setf ,sym (if (and ,strip (not (cdr list))) (car list) list)) t)
        (with-gensyms (x w r p f loop succeed fail end)
          `(let ((,x list) (,p nil) (,w nil) (,r nil))
                 (setf ,sym (list (car list)))
@@ -135,10 +135,10 @@
 
 (defun generate-bind-body (sym rest type &optional fun)
    "Dispatches to bind-single or bind-multiple based on binding-mode"
-   (case binding-mode
-      (single (bind-single sym rest type fun))
-      (multiple (bind-multiple sym rest type fun))
-      (mixed (bind-multiple sym rest type fun t))
+   (alexandria:switch (binding-mode :test #'symbol-eq)
+      ('single (bind-single sym rest type fun))
+      ('multiple (bind-multiple sym rest type fun))
+      ('mixed (bind-multiple sym rest type fun t))
       (otherwise (error "invalid binding-mode: ~a" binding-mode))))
 
 (defun match (exp)
